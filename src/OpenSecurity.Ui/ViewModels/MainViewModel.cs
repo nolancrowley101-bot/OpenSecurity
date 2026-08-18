@@ -7,19 +7,22 @@ using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using OpenSecurity.Core.Hashing;
 using OpenSecurity.Core.Heuristics;
+using OpenSecurity.Core.History;
 using OpenSecurity.Core.Quarantine;
+using OpenSecurity.Core.Reporting;
 using OpenSecurity.Core.Rules;
 using OpenSecurity.Core.Scanning;
+using OpenSecurity.Core.Scheduling;
+using OpenSecurity.Core.Settings;
 using OpenSecurity.Core.Updates;
 
 namespace OpenSecurity.Ui.ViewModels;
 
-public sealed class MainViewModel : INotifyPropertyChanged
+public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly string _hashDbPath;
     private readonly string _rulesDir;
     private readonly string _allowlistPath;
-    private readonly QuarantineManager _quarantineManager;
     private readonly SignatureUpdater _signatureUpdater = new();
     private readonly DispatcherTimer _elapsedTimer;
     private Stopwatch? _stopwatch;
@@ -33,22 +36,31 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _elapsedLabel = "";
     private string _updateFeedUrl = SignatureUpdater.SuggestedFeedUrl;
 
-    public MainViewModel(string hashDbPath, string rulesDir, string allowlistPath, string quarantineDirectory)
+    public MainViewModel(
+        string hashDbPath, string rulesDir, string allowlistPath, string quarantineDirectory,
+        string historyFilePath, string settingsFilePath, Action<bool>? applyAutoStart = null)
     {
         _hashDbPath = hashDbPath;
         _rulesDir = rulesDir;
         _allowlistPath = allowlistPath;
         _quarantineManager = new QuarantineManager(quarantineDirectory);
+        _historyStore = new ScanHistoryStore(historyFilePath);
+        _scheduledScanManager = new ScheduledScanManager();
+        _settingsFilePath = settingsFilePath;
+        _settings = AppSettings.Load(settingsFilePath);
+        _applyAutoStart = applyAutoStart;
 
         ReloadEngine();
         RefreshQuarantineEntries();
+        RefreshHistory();
+        InitializeRealTime();
+        RefreshScheduleStatus();
 
         _elapsedTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _elapsedTimer.Tick += (_, _) => ElapsedLabel = _stopwatch is null ? "" : $"{_stopwatch.Elapsed.TotalSeconds:F1}s";
     }
 
     public ObservableCollection<ScanRowViewModel> Results { get; } = new();
-    public ObservableCollection<QuarantineRowViewModel> QuarantineEntries { get; } = new();
 
     public string TargetPath
     {
@@ -81,6 +93,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public bool CanScan => !IsScanning && (File.Exists(TargetPath) || Directory.Exists(TargetPath));
+    public bool CanExport => !IsScanning && Results.Count > 0;
 
     public string StatusText
     {
@@ -93,6 +106,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         get => _elapsedLabel;
         private set { _elapsedLabel = value; OnPropertyChanged(); }
     }
+
+    public List<string> AvailableDrives { get; } = DriveInfo.GetDrives()
+        .Where(d => d.IsReady && d.DriveType == DriveType.Fixed)
+        .Select(d => d.RootDirectory.FullName)
+        .ToList();
 
     private int _cleanCount;
     private int _suspiciousCount;
@@ -110,6 +128,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public int RuleCount { get => _ruleCount; private set { _ruleCount = value; OnPropertyChanged(); } }
     public int AllowlistCount { get => _allowlistCount; private set { _allowlistCount = value; OnPropertyChanged(); } }
 
+    public void ScanFullDrive(string driveRoot)
+    {
+        TargetPath = driveRoot;
+        IsRecursive = true;
+    }
+
     public async Task RunScanAsync()
     {
         if (!File.Exists(TargetPath) && !Directory.Exists(TargetPath))
@@ -125,12 +149,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ErrorCount = 0;
 
         IsScanning = true;
+        OnPropertyChanged(nameof(CanExport));
         StatusText = "Scanning...";
         _stopwatch = Stopwatch.StartNew();
         _elapsedTimer.Start();
 
         var path = TargetPath;
         var recursive = IsRecursive;
+        var scannedResults = new List<ScanResult>();
 
         try
         {
@@ -142,6 +168,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
                 foreach (var result in results)
                 {
+                    scannedResults.Add(result);
                     var row = new ScanRowViewModel(result);
                     System.Windows.Application.Current.Dispatcher.Invoke(() => AddResult(row));
                 }
@@ -153,41 +180,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _elapsedTimer.Stop();
             ElapsedLabel = $"{_stopwatch.Elapsed.TotalSeconds:F1}s";
             IsScanning = false;
+            OnPropertyChanged(nameof(CanExport));
             StatusText = $"Scanned {Results.Count} file(s) in {_stopwatch.Elapsed.TotalSeconds:F1}s.";
+
+            _historyStore.Append(ScanHistoryEntry.FromResults(path, scannedResults, _stopwatch.Elapsed.TotalSeconds));
+            RefreshHistory();
         }
     }
 
-    public void QuarantineResult(ScanRowViewModel row)
+    public void ExportReport(string path)
     {
-        var reason = string.Join("; ", row.Findings.Select(f => f.Name));
-        _quarantineManager.Quarantine(row.FilePath, row.Sha256, reason);
-        Results.Remove(row);
-        DecrementCount(row.Verdict);
-        RefreshQuarantineEntries();
-        StatusText = $"Quarantined {Path.GetFileName(row.FilePath)}.";
-    }
-
-    public void AllowlistResult(ScanRowViewModel row)
-    {
-        HashSignatureDatabase.AppendNewEntries(_allowlistPath, new[] { (row.Sha256, "user-allowlisted") });
-        Results.Remove(row);
-        DecrementCount(row.Verdict);
-        ReloadEngine();
-        StatusText = $"Added {Path.GetFileName(row.FilePath)} to the allowlist - it won't be flagged by rules/heuristics again.";
-    }
-
-    public void RestoreQuarantineEntry(QuarantineRowViewModel entry)
-    {
-        _quarantineManager.Restore(entry.Id);
-        RefreshQuarantineEntries();
-        StatusText = $"Restored {Path.GetFileName(entry.OriginalPath)}.";
-    }
-
-    public void DeleteQuarantineEntry(QuarantineRowViewModel entry)
-    {
-        _quarantineManager.Delete(entry.Id);
-        RefreshQuarantineEntries();
-        StatusText = $"Permanently deleted quarantined file (was {Path.GetFileName(entry.OriginalPath)}).";
+        ReportExporter.Export(Results.Select(r => r.Result).ToList(), path);
+        StatusText = $"Report exported to {path}.";
     }
 
     public async Task UpdateSignaturesAsync()
@@ -220,13 +224,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         HashSignatureCount = hashDb.Count;
         RuleCount = rules.Count;
         AllowlistCount = allowlist.Count;
-    }
 
-    private void RefreshQuarantineEntries()
-    {
-        QuarantineEntries.Clear();
-        foreach (var entry in _quarantineManager.ListEntries())
-            QuarantineEntries.Add(new QuarantineRowViewModel(entry));
+        RestartRealTimeProtectionIfRunning();
     }
 
     private void DecrementCount(Verdict verdict)
@@ -250,6 +249,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
             case Verdict.Malicious: MaliciousCount++; break;
             case Verdict.Error: ErrorCount++; break;
         }
+    }
+
+    public void Dispose()
+    {
+        _realTimeService?.Dispose();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

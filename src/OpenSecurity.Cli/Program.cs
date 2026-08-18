@@ -1,9 +1,14 @@
+using System.Diagnostics;
 using OpenSecurity.Core;
 using OpenSecurity.Core.Hashing;
 using OpenSecurity.Core.Heuristics;
+using OpenSecurity.Core.History;
 using OpenSecurity.Core.Quarantine;
+using OpenSecurity.Core.RealTime;
+using OpenSecurity.Core.Reporting;
 using OpenSecurity.Core.Rules;
 using OpenSecurity.Core.Scanning;
+using OpenSecurity.Core.Scheduling;
 using OpenSecurity.Core.Updates;
 
 namespace OpenSecurity.Cli;
@@ -12,14 +17,18 @@ public static class Program
 {
     public static int Main(string[] args)
     {
-        if (args.Length > 0 && args[0] == "update-signatures")
-            return RunUpdateSignatures(args.Skip(1).ToArray()).GetAwaiter().GetResult();
-
-        if (args.Length > 0 && args[0] == "list-quarantine")
-            return RunListQuarantine();
-
-        if (args.Length > 0 && args[0] == "restore-quarantine")
-            return RunRestoreQuarantine(args.Skip(1).ToArray());
+        if (args.Length > 0)
+        {
+            switch (args[0])
+            {
+                case "update-signatures": return RunUpdateSignatures(args.Skip(1).ToArray()).GetAwaiter().GetResult();
+                case "list-quarantine": return RunListQuarantine();
+                case "restore-quarantine": return RunRestoreQuarantine(args.Skip(1).ToArray());
+                case "list-history": return RunListHistory();
+                case "schedule": return RunSchedule(args.Skip(1).ToArray());
+                case "watch": return RunWatch(args.Skip(1).ToArray());
+            }
+        }
 
         var options = CliOptions.Parse(args);
         if (options is null)
@@ -53,9 +62,11 @@ public static class Program
         var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist);
         var quarantineManager = new QuarantineManager(DefaultPaths.DefaultQuarantineDirectory());
 
+        var stopwatch = Stopwatch.StartNew();
         var results = File.Exists(options.TargetPath)
             ? new[] { engine.ScanFile(options.TargetPath) }
             : engine.ScanDirectory(options.TargetPath, options.Recursive).ToArray();
+        stopwatch.Stop();
 
         var scanned = 0;
         var clean = 0;
@@ -96,6 +107,15 @@ public static class Program
 
         Console.WriteLine();
         Console.WriteLine($"Scanned {scanned} file(s): {clean} clean, {suspicious} suspicious, {malicious} malicious, {errors} errors.");
+
+        var historyStore = new ScanHistoryStore(DefaultPaths.DefaultHistoryFilePath());
+        historyStore.Append(ScanHistoryEntry.FromResults(options.TargetPath, results, stopwatch.Elapsed.TotalSeconds));
+
+        if (options.ExportPath is not null)
+        {
+            ReportExporter.Export(results, options.ExportPath);
+            Console.WriteLine($"Report exported to {options.ExportPath}");
+        }
 
         return malicious > 0 ? 1 : 0;
     }
@@ -180,6 +200,145 @@ public static class Program
         }
     }
 
+    private static int RunListHistory()
+    {
+        var store = new ScanHistoryStore(DefaultPaths.DefaultHistoryFilePath());
+        var entries = store.ListEntries();
+
+        if (entries.Count == 0)
+        {
+            Console.WriteLine("No scan history yet.");
+            return 0;
+        }
+
+        foreach (var entry in entries)
+        {
+            Console.WriteLine($"{entry.TimestampUtc:u}  {entry.TargetPath}");
+            Console.WriteLine($"  {entry.FilesScanned} scanned, {entry.CleanCount} clean, {entry.SuspiciousCount} suspicious, {entry.MaliciousCount} malicious, {entry.ErrorCount} errors ({entry.DurationSeconds:F1}s)");
+            foreach (var flagged in entry.FlaggedFiles)
+                Console.WriteLine($"    [{flagged.Verdict}] {flagged.FilePath} ({flagged.TopFinding})");
+        }
+        return 0;
+    }
+
+    private static int RunSchedule(string[] args)
+    {
+        var manager = new ScheduledScanManager();
+
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("usage: OpenSecurity.Cli schedule <enable <path> [--frequency daily|weekly] [--time HH:mm] [--quarantine]|disable|status>");
+            return 2;
+        }
+
+        switch (args[0])
+        {
+            case "status":
+                Console.WriteLine(manager.Exists() ? $"Scheduled scan '{ScheduledScanManager.TaskName}' is enabled." : "No scheduled scan configured.");
+                return 0;
+
+            case "disable":
+                manager.Delete();
+                Console.WriteLine("Scheduled scan disabled.");
+                return 0;
+
+            case "enable":
+                if (args.Length < 2)
+                {
+                    Console.Error.WriteLine("error: missing path to scan");
+                    return 2;
+                }
+
+                var targetPath = args[1];
+                var frequency = ScanFrequency.Daily;
+                var time = new TimeSpan(9, 0, 0);
+                var quarantine = false;
+
+                for (var i = 2; i < args.Length; i++)
+                {
+                    switch (args[i])
+                    {
+                        case "--frequency" when ++i < args.Length:
+                            frequency = args[i].Equals("weekly", StringComparison.OrdinalIgnoreCase) ? ScanFrequency.Weekly : ScanFrequency.Daily;
+                            break;
+                        case "--time" when ++i < args.Length:
+                            if (!TimeSpan.TryParse(args[i], out time))
+                            {
+                                Console.Error.WriteLine($"error: invalid time '{args[i]}', expected HH:mm");
+                                return 2;
+                            }
+                            break;
+                        case "--quarantine":
+                            quarantine = true;
+                            break;
+                    }
+                }
+
+                var cliExePath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "OpenSecurity.Cli.exe");
+                try
+                {
+                    manager.CreateOrUpdate(cliExePath, new ScheduledScanConfig(targetPath, quarantine, frequency, time));
+                    Console.WriteLine($"Scheduled scan enabled: {frequency} at {time:hh\\:mm}, target '{targetPath}'{(quarantine ? " (auto-quarantine)" : "")}.");
+                    return 0;
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.Error.WriteLine($"error: {ex.Message}");
+                    return 1;
+                }
+
+            default:
+                Console.Error.WriteLine($"error: unknown schedule command '{args[0]}'");
+                return 2;
+        }
+    }
+
+    private static int RunWatch(string[] args)
+    {
+        var folders = args.Length > 0 ? args.ToList() : OpenSecurity.Core.Settings.AppSettings.DefaultWatchedFolders();
+        var missing = folders.Where(f => !Directory.Exists(f)).ToList();
+        if (missing.Count > 0)
+        {
+            Console.Error.WriteLine($"error: folder(s) not found: {string.Join(", ", missing)}");
+            return 2;
+        }
+
+        var appDir = AppContext.BaseDirectory;
+        var hashDbPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "hashes.txt"));
+        var rulesDir = DefaultPaths.FindUp(appDir, "rules");
+        var allowlistPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "allowlist.txt"));
+
+        var hashDb = hashDbPath is not null ? HashSignatureDatabase.Load(hashDbPath) : HashSignatureDatabase.Empty();
+        var rules = rulesDir is not null ? PatternRuleParser.ParseDirectory(rulesDir) : new List<PatternRule>();
+        var allowlist = allowlistPath is not null ? HashSignatureDatabase.Load(allowlistPath) : HashSignatureDatabase.Empty();
+        var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist);
+
+        using var service = new RealTimeProtectionService(engine);
+        service.FileScanned += result => Console.WriteLine($"[scanned]    {result.FilePath} -> {result.OverallVerdict}");
+        service.ThreatDetected += result =>
+        {
+            Console.WriteLine($"[{result.OverallVerdict.ToString().ToUpperInvariant()}]  {result.FilePath}");
+            foreach (var finding in result.Findings)
+                Console.WriteLine($"    - [{finding.Source}] {finding.Name}: {finding.Detail}");
+        };
+
+        service.Start(folders);
+        Console.WriteLine($"Watching {folders.Count} folder(s) for real-time protection. Press Ctrl+C to stop.");
+        foreach (var folder in folders)
+            Console.WriteLine($"  - {folder}");
+
+        var exitSignal = new TaskCompletionSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            exitSignal.TrySetResult();
+        };
+        exitSignal.Task.GetAwaiter().GetResult();
+
+        service.Stop();
+        return 0;
+    }
+
     private static void PrintFindings(ScanResult result, string label)
     {
         Console.WriteLine($"[{label}]  {result.FilePath}  (sha256: {result.Sha256})");
@@ -193,10 +352,15 @@ public static class Program
             OpenSecurity - on-demand malware scanner
 
             Usage:
-              OpenSecurity.Cli <path> [--recursive] [--verbose] [--hashdb <file>] [--rules <dir>] [--allowlist <file>] [--quarantine]
+              OpenSecurity.Cli <path> [--recursive] [--verbose] [--hashdb <file>] [--rules <dir>] [--allowlist <file>] [--quarantine] [--export <file>]
               OpenSecurity.Cli update-signatures <url> [--hashdb <file>]
               OpenSecurity.Cli list-quarantine
               OpenSecurity.Cli restore-quarantine <id>
+              OpenSecurity.Cli list-history
+              OpenSecurity.Cli schedule enable <path> [--frequency daily|weekly] [--time HH:mm] [--quarantine]
+              OpenSecurity.Cli schedule disable
+              OpenSecurity.Cli schedule status
+              OpenSecurity.Cli watch [folder...]
 
             Options:
               --recursive, -r      Scan directories recursively (default: on for directories)
@@ -206,9 +370,16 @@ public static class Program
               --rules <dir>        Path to pattern rules directory (default: rules/)
               --allowlist <file>   Path to allowlist database (default: signatures/allowlist.txt)
               --quarantine         Move malicious files to quarantine instead of just reporting them
+              --export <file>      Write a JSON or CSV report of the scan (format from extension)
+
+            Every scan is recorded to local history automatically. To scan an entire drive,
+            just pass its root, e.g. OpenSecurity.Cli.exe C:\ --quarantine
 
             update-signatures fetches a plaintext SHA-256 hash feed and merges new entries into
             the hash database. Suggested feed: https://bazaar.abuse.ch/export/txt/sha256/full/
+
+            watch runs real-time protection in the foreground: it scans new/changed files in the
+            given folders (default: Downloads, Desktop, temp) as they appear.
 
             Exit codes:
               0   no malicious files found

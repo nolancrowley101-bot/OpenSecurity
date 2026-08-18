@@ -72,26 +72,15 @@ public sealed class ScanEngine
 
     public IEnumerable<ScanResult> ScanDirectory(string directoryPath, bool recursive = true)
     {
-        var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-        IEnumerable<string>? files = null;
-        ScanResult? enumerateError = null;
-        try
+        if (!Directory.Exists(directoryPath))
         {
-            files = Directory.EnumerateFiles(directoryPath, "*", option);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            enumerateError = new ScanResult { FilePath = directoryPath, FileSizeBytes = 0, Sha256 = "" };
-            enumerateError.Findings.Add(new ScanFinding("engine", Verdict.Error, "enumerate-error", ex.Message, 0));
-        }
-
-        if (enumerateError is not null)
-        {
-            yield return enumerateError;
+            var missing = new ScanResult { FilePath = directoryPath, FileSizeBytes = 0, Sha256 = "" };
+            missing.Findings.Add(new ScanFinding("engine", Verdict.Error, "directory-not-found", "directory does not exist", 0));
+            yield return missing;
             yield break;
         }
 
-        foreach (var file in files!)
+        foreach (var file in ResilientFileWalker.EnumerateFiles(directoryPath, recursive))
         {
             ScanResult result;
             try

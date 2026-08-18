@@ -10,6 +10,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
+
+  <!-- WPF's System.Windows.* and WinForms' System.Windows.Forms.* clash on many type names
+       (Application, DragEventArgs, DataFormats, Brush, ...). Only enable WPF's implicit
+       usings project-wide; TrayIconManager.cs imports System.Windows.Forms explicitly. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
 
 </Project>

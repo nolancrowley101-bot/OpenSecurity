@@ -6,7 +6,7 @@ By **Nolan Crowley**. Open source under the [MIT License](LICENSE).
 
 ## What it does
 
-OpenSecurity scans a file or folder using three detection layers:
+OpenSecurity scans a file, folder, or entire drive using three detection layers:
 
 - **Hash signatures** — SHA-256 exact match against a known-bad hash list (`signatures/hashes.txt`)
 - **Pattern rules** — simplified YARA-style string/hex matching (`rules/*.yar`)
@@ -19,13 +19,19 @@ Beyond detection, it also has:
 - **Quarantine** — move a detected file into an isolated, obfuscated holding area instead of just reporting it, with restore/delete
 - **Signature updates** — pull a plaintext SHA-256 hash feed (e.g. [abuse.ch MalwareBazaar](https://bazaar.abuse.ch/export/txt/sha256/full/)) from any URL and merge new entries into the local hash database
 - **Allowlist** — mark a file as trusted by hash to suppress pattern-rule/heuristic false positives on it in future scans (a hash-signature match always still wins, so this can't hide a confirmed-malicious file)
+- **Full-drive scanning** — point it at an entire drive; a resilient directory walker skips inaccessible/protected folders instead of aborting the whole scan
+- **Scan history** — every scan is logged locally so you can look back at what was found and when
+- **Exportable reports** — save a completed scan's results as JSON or CSV
+- **Scheduled scanning** — set up a recurring scan via Windows Task Scheduler, no need to keep the app running
+- **Real-time protection** — a user-mode folder watcher scans new/changed files as they land in chosen folders (Downloads, Desktop, temp by default); not a kernel-mode driver, but no admin rights or signed driver needed either
+- **System tray** — runs quietly in the tray, with an optional "start with Windows" toggle so real-time protection is actually always on
 
 ## Projects
 
-- `src/OpenSecurity.Core` — the scan engine (hashing, rules, PE parsing, heuristics)
+- `src/OpenSecurity.Core` — the scan engine and all supporting services (hashing, rules, PE parsing, heuristics, quarantine, history, scheduling, real-time protection, signature updates, reporting)
 - `src/OpenSecurity.Cli` — command-line scanner
-- `src/OpenSecurity.Ui` — WPF desktop app (dark theme, drag-and-drop, live results)
-- `tests/OpenSecurity.Core.Tests` — unit tests for the engine
+- `src/OpenSecurity.Ui` — WPF desktop app (dark theme, drag-and-drop, live results, tray icon)
+- `tests/OpenSecurity.Core.Tests` — unit and integration tests for the engine
 
 ## Running it
 
@@ -51,17 +57,24 @@ To pull in more signatures from a feed:
 OpenSecurity.Cli.exe update-signatures https://bazaar.abuse.ch/export/txt/sha256/full/
 ```
 
-Quarantine management from the CLI:
+## CLI reference
 
 ```bash
-OpenSecurity.Cli.exe <path> --quarantine     # scan and auto-quarantine malicious files
+OpenSecurity.Cli.exe <path> [--recursive] [--verbose] [--quarantine] [--export report.json]
 OpenSecurity.Cli.exe list-quarantine
 OpenSecurity.Cli.exe restore-quarantine <id>
+OpenSecurity.Cli.exe list-history
+OpenSecurity.Cli.exe schedule enable <path> [--frequency daily|weekly] [--time HH:mm] [--quarantine]
+OpenSecurity.Cli.exe schedule disable
+OpenSecurity.Cli.exe schedule status
+OpenSecurity.Cli.exe watch [folder...]     # real-time protection in the foreground
 ```
+
+To scan an entire drive, just point it at the root: `OpenSecurity.Cli.exe C:\ --quarantine`
 
 ## Status
 
-This is a personal/educational project, not a replacement for a commercial antivirus. Currently on-demand scanning only; scheduled scanning and real-time protection are potential future additions.
+This is a personal/educational project, not a replacement for a commercial antivirus. Real-time protection is a user-mode folder watcher, not a kernel-mode filter driver — it can't intercept execution the way a real AV's minifilter does, but it does catch files as they land in watched folders.
 
 ## Testing
 

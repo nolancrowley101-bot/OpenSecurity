@@ -9,6 +9,7 @@ public sealed class CliOptions
     public string? RulesDir { get; init; }
     public string? AllowlistPath { get; init; }
     public bool Quarantine { get; init; }
+    public string? ExportPath { get; init; }
 
     public static CliOptions? Parse(string[] args)
     {
@@ -22,6 +23,7 @@ public sealed class CliOptions
         string? rulesDir = null;
         string? allowlist = null;
         var quarantine = false;
+        string? exportPath = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -51,6 +53,10 @@ public sealed class CliOptions
                 case "--quarantine":
                     quarantine = true;
                     break;
+                case "--export":
+                    if (++i >= args.Length) return null;
+                    exportPath = args[i];
+                    break;
                 case "-h" or "--help":
                     return null;
                 default:
@@ -71,7 +77,8 @@ public sealed class CliOptions
                 HashDbPath = hashDb,
                 RulesDir = rulesDir,
                 AllowlistPath = allowlist,
-                Quarantine = quarantine
+                Quarantine = quarantine,
+                ExportPath = exportPath
             };
     }
 }
