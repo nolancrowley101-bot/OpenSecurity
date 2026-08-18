@@ -1,0 +1,8 @@
+# OpenSecurity known-bad hash signatures
+# Format: <sha256 hex>  <label>
+# One entry per line. Lines starting with # are ignored.
+#
+# Seeded with the EICAR antivirus test file — the industry-standard, completely
+# harmless string every AV vendor recognizes as "malware" for testing purposes.
+# https://www.eicar.org/download-anti-malware-testfile/
+275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f  eicar-test-file

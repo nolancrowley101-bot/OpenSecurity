@@ -1,0 +1,16 @@
+<Application x:Class="OpenSecurity.Ui.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:OpenSecurity.Ui"
+             xmlns:conv="clr-namespace:OpenSecurity.Ui.Converters">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Theme/DarkTheme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:VerdictToBrushConverter x:Key="VerdictToBrushConverter" />
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

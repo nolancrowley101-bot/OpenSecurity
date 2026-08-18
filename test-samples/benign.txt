@@ -1,0 +1,2 @@
+This is just an ordinary, harmless text file used to confirm the scanner
+reports a clean verdict when nothing suspicious is present.

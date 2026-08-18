@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpenSecurity.Cli/OpenSecurity.Cli.csproj" />
+    <Project Path="src/OpenSecurity.Core/OpenSecurity.Core.csproj" />
+    <Project Path="src/OpenSecurity.Ui/OpenSecurity.Ui.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpenSecurity.Core.Tests/OpenSecurity.Core.Tests.csproj" />
+  </Folder>
+</Solution>
