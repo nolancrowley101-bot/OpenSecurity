@@ -12,12 +12,14 @@ public sealed class ScanEngine
     private readonly HashScanner _hashScanner;
     private readonly PatternRuleEngine _ruleEngine;
     private readonly HeuristicAnalyzer _heuristicAnalyzer;
+    private readonly HashSignatureDatabase _allowlist;
 
-    public ScanEngine(HashScanner hashScanner, PatternRuleEngine ruleEngine, HeuristicAnalyzer heuristicAnalyzer)
+    public ScanEngine(HashScanner hashScanner, PatternRuleEngine ruleEngine, HeuristicAnalyzer heuristicAnalyzer, HashSignatureDatabase? allowlist = null)
     {
         _hashScanner = hashScanner;
         _ruleEngine = ruleEngine;
         _heuristicAnalyzer = heuristicAnalyzer;
+        _allowlist = allowlist ?? HashSignatureDatabase.Empty();
     }
 
     public ScanResult ScanFile(string path)
@@ -54,6 +56,12 @@ public sealed class ScanEngine
         var result = new ScanResult { FilePath = path, FileSizeBytes = fileBytes.LongLength, Sha256 = sha256 };
 
         result.Findings.AddRange(_hashScanner.Scan(sha256));
+
+        // An explicit known-malicious hash match always stands; the allowlist only suppresses
+        // the noisier pattern-rule/heuristic layers, so it can't be used to hide a blacklisted file.
+        if (_allowlist.TryMatch(sha256, out _))
+            return result;
+
         result.Findings.AddRange(_ruleEngine.Scan(fileBytes));
 
         if (PeParser.TryParse(fileBytes, out var peFile) && peFile is not null)

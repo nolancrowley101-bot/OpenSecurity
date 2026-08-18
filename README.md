@@ -14,6 +14,12 @@ OpenSecurity scans a file or folder using three detection layers:
 
 No external antivirus/YARA native dependencies — everything is self-contained managed code.
 
+Beyond detection, it also has:
+
+- **Quarantine** — move a detected file into an isolated, obfuscated holding area instead of just reporting it, with restore/delete
+- **Signature updates** — pull a plaintext SHA-256 hash feed (e.g. [abuse.ch MalwareBazaar](https://bazaar.abuse.ch/export/txt/sha256/full/)) from any URL and merge new entries into the local hash database
+- **Allowlist** — mark a file as trusted by hash to suppress pattern-rule/heuristic false positives on it in future scans (a hash-signature match always still wins, so this can't hide a confirmed-malicious file)
+
 ## Projects
 
 - `src/OpenSecurity.Core` — the scan engine (hashing, rules, PE parsing, heuristics)
@@ -37,7 +43,21 @@ Or grab the prebuilt `.exe` from the [Releases](../../releases) page — self-co
 
 ## Extending detection
 
-Drop more SHA-256 hashes into `signatures/hashes.txt`, or more `.yar` rule files into `rules/` — both load at runtime, no rebuild needed.
+Drop more SHA-256 hashes into `signatures/hashes.txt`, or more `.yar` rule files into `rules/` — both load at runtime, no rebuild needed. Add a file's hash to `signatures/allowlist.txt` to stop it being flagged.
+
+To pull in more signatures from a feed:
+
+```bash
+OpenSecurity.Cli.exe update-signatures https://bazaar.abuse.ch/export/txt/sha256/full/
+```
+
+Quarantine management from the CLI:
+
+```bash
+OpenSecurity.Cli.exe <path> --quarantine     # scan and auto-quarantine malicious files
+OpenSecurity.Cli.exe list-quarantine
+OpenSecurity.Cli.exe restore-quarantine <id>
+```
 
 ## Status
 

@@ -21,4 +21,6 @@ public sealed class ScanRowViewModel
     public string SizeLabel => Result.FileSizeBytes >= 1024 * 1024
         ? $"{Result.FileSizeBytes / (1024.0 * 1024.0):F1} MB"
         : $"{Result.FileSizeBytes / 1024.0:F1} KB";
+
+    public bool ShowActions => Verdict is Verdict.Malicious or Verdict.Suspicious;
 }

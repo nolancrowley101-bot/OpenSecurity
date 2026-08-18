@@ -7,6 +7,8 @@ public sealed class CliOptions
     public bool Verbose { get; init; }
     public string? HashDbPath { get; init; }
     public string? RulesDir { get; init; }
+    public string? AllowlistPath { get; init; }
+    public bool Quarantine { get; init; }
 
     public static CliOptions? Parse(string[] args)
     {
@@ -18,6 +20,8 @@ public sealed class CliOptions
         var verbose = false;
         string? hashDb = null;
         string? rulesDir = null;
+        string? allowlist = null;
+        var quarantine = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -40,6 +44,13 @@ public sealed class CliOptions
                     if (++i >= args.Length) return null;
                     rulesDir = args[i];
                     break;
+                case "--allowlist":
+                    if (++i >= args.Length) return null;
+                    allowlist = args[i];
+                    break;
+                case "--quarantine":
+                    quarantine = true;
+                    break;
                 case "-h" or "--help":
                     return null;
                 default:
@@ -52,6 +63,15 @@ public sealed class CliOptions
 
         return path is null
             ? null
-            : new CliOptions { TargetPath = path, Recursive = recursive, Verbose = verbose, HashDbPath = hashDb, RulesDir = rulesDir };
+            : new CliOptions
+            {
+                TargetPath = path,
+                Recursive = recursive,
+                Verbose = verbose,
+                HashDbPath = hashDb,
+                RulesDir = rulesDir,
+                AllowlistPath = allowlist,
+                Quarantine = quarantine
+            };
     }
 }

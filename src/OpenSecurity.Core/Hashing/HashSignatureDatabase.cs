@@ -44,4 +44,25 @@ public sealed class HashSignatureDatabase
     public static HashSignatureDatabase Empty() => new(new Dictionary<string, string>());
 
     public bool TryMatch(string sha256Hex, out string label) => _hashToLabel.TryGetValue(sha256Hex, out label!);
+
+    /// <summary>Appends entries not already present in the file (by hash). Returns how many were newly added.</summary>
+    public static int AppendNewEntries(string path, IEnumerable<(string Hash, string Label)> entries)
+    {
+        var existing = Load(path);
+        var toAdd = entries
+            .Where(e => e.Hash.Length == 64 && !existing.TryMatch(e.Hash, out _))
+            .GroupBy(e => e.Hash, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+
+        if (toAdd.Count == 0)
+            return 0;
+
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        File.AppendAllLines(path, toAdd.Select(e => $"{e.Hash.ToLowerInvariant()}  {e.Label}"));
+        return toAdd.Count;
+    }
 }

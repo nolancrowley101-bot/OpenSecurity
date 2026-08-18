@@ -14,10 +14,9 @@ public partial class App : Application
         var appDir = AppContext.BaseDirectory;
         var hashDbPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "hashes.txt")) ?? Path.Combine(appDir, "signatures", "hashes.txt");
         var rulesDir = DefaultPaths.FindUp(appDir, "rules") ?? Path.Combine(appDir, "rules");
-        var rulesCount = Directory.Exists(rulesDir) ? Directory.EnumerateFiles(rulesDir, "*.yar", SearchOption.AllDirectories).Count() : 0;
+        var allowlistPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "allowlist.txt")) ?? Path.Combine(appDir, "signatures", "allowlist.txt");
 
-        var engineInfo = $"signatures: {hashDbPath}   |   rules: {rulesCount} file(s) from {rulesDir}";
-        var viewModel = new MainViewModel(hashDbPath, rulesDir, engineInfo);
+        var viewModel = new MainViewModel(hashDbPath, rulesDir, allowlistPath, DefaultPaths.DefaultQuarantineDirectory());
 
         var window = new MainWindow(viewModel);
         window.Show();

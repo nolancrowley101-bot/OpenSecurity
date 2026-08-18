@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using Microsoft.Win32;
 using OpenSecurity.Ui.ViewModels;
 
@@ -47,5 +48,48 @@ public partial class MainWindow : Window
 
         if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
             _viewModel.TargetPath = paths[0];
+    }
+
+    private void Quarantine_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is ScanRowViewModel row)
+        {
+            var confirm = MessageBox.Show(
+                $"Move '{System.IO.Path.GetFileName(row.FilePath)}' to quarantine?\n\nThe file will be removed from its current location. You can restore it later from the Quarantine tab.",
+                "Quarantine file", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+            if (confirm == MessageBoxResult.Yes)
+                _viewModel.QuarantineResult(row);
+        }
+    }
+
+    private void Allow_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is ScanRowViewModel row)
+            _viewModel.AllowlistResult(row);
+    }
+
+    private void RestoreQuarantine_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is QuarantineRowViewModel entry)
+            _viewModel.RestoreQuarantineEntry(entry);
+    }
+
+    private void DeleteQuarantine_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is QuarantineRowViewModel entry)
+        {
+            var confirm = MessageBox.Show(
+                $"Permanently delete the quarantined copy of '{System.IO.Path.GetFileName(entry.OriginalPath)}'?\n\nThis cannot be undone.",
+                "Delete quarantined file", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+            if (confirm == MessageBoxResult.Yes)
+                _viewModel.DeleteQuarantineEntry(entry);
+        }
+    }
+
+    private async void UpdateSignatures_Click(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.UpdateSignaturesAsync();
     }
 }

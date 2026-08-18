@@ -15,4 +15,8 @@ public static class DefaultPaths
         }
         return null;
     }
+
+    /// <summary>Per-user quarantine folder, independent of wherever the app binary happens to be running from.</summary>
+    public static string DefaultQuarantineDirectory() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenSecurity", "Quarantine");
 }

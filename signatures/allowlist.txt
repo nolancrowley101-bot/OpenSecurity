@@ -1,0 +1,7 @@
+# OpenSecurity allowlist
+# Files whose SHA-256 hash appears here have their pattern-rule and heuristic findings
+# suppressed (false-positive control) - but NOT a hash-signature match, so this can't be
+# used to hide a file that's explicitly known-malicious.
+#
+# Format: <sha256 hex>  <label>
+# One entry per line. Lines starting with # are ignored.
