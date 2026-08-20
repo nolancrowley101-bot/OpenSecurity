@@ -4,3 +4,8 @@ publish/
 *.user
 .vs/
 ui_stdout.log
+
+# Code signing private key material - never commit. The public .cer and README.md
+# in this folder ARE meant to be committed (no private key in them).
+signing/*.pfx
+signing/cert-password.txt

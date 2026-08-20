@@ -6,5 +6,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OpenSecurity.Core.Tests/OpenSecurity.Core.Tests.csproj" />
+    <Project Path="tests/OpenSecurity.Ui.Tests/OpenSecurity.Ui.Tests.csproj" />
   </Folder>
 </Solution>

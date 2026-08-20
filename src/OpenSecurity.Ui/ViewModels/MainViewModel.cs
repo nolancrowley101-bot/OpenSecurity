@@ -53,6 +53,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
         ReloadEngine();
         RefreshQuarantineEntries();
         RefreshHistory();
+        InitializeIntegrations();
         InitializeRealTime();
         RefreshScheduleStatus();
 

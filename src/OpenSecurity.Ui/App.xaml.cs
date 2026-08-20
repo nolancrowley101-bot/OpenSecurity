@@ -26,10 +26,22 @@ public partial class App : Application
             DefaultPaths.DefaultSettingsFilePath(),
             AutoStartManager.SetEnabled);
 
+        var scanArgIndex = Array.IndexOf(e.Args, "--scan");
+        var scanPath = scanArgIndex >= 0 && scanArgIndex + 1 < e.Args.Length ? e.Args[scanArgIndex + 1] : null;
         var startMinimized = e.Args.Contains("--minimized");
-        var window = new MainWindow(viewModel, startMinimized);
 
-        if (!startMinimized)
+        var window = new MainWindow(viewModel, startMinimized && scanPath is null);
+
+        if (scanPath is not null)
+        {
+            viewModel.TargetPath = scanPath;
             window.Show();
+            window.Activate();
+            _ = viewModel.RunScanAsync();
+        }
+        else if (!startMinimized)
+        {
+            window.Show();
+        }
     }
 }

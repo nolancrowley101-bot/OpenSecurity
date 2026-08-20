@@ -25,13 +25,16 @@ Beyond detection, it also has:
 - **Scheduled scanning** — set up a recurring scan via Windows Task Scheduler, no need to keep the app running
 - **Real-time protection** — a user-mode folder watcher scans new/changed files as they land in chosen folders (Downloads, Desktop, temp by default); not a kernel-mode driver, but no admin rights or signed driver needed either
 - **System tray** — runs quietly in the tray, with an optional "start with Windows" toggle so real-time protection is actually always on
+- **Explorer integration** — an optional "Scan with OpenSecurity" right-click entry for files, folders, and drives, which opens the app and scans immediately
+- **Code signing** — release exes are signed (see [Code signing](#code-signing) below for what that does and doesn't get you)
 
 ## Projects
 
 - `src/OpenSecurity.Core` — the scan engine and all supporting services (hashing, rules, PE parsing, heuristics, quarantine, history, scheduling, real-time protection, signature updates, reporting)
 - `src/OpenSecurity.Cli` — command-line scanner
-- `src/OpenSecurity.Ui` — WPF desktop app (dark theme, drag-and-drop, live results, tray icon)
+- `src/OpenSecurity.Ui` — WPF desktop app (dark theme, drag-and-drop, live results, tray icon, Explorer integration)
 - `tests/OpenSecurity.Core.Tests` — unit and integration tests for the engine
+- `tests/OpenSecurity.Ui.Tests` — tests for Windows-shell integrations (registry-backed context menu)
 
 ## Running it
 
@@ -71,6 +74,10 @@ OpenSecurity.Cli.exe watch [folder...]     # real-time protection in the foregro
 ```
 
 To scan an entire drive, just point it at the root: `OpenSecurity.Cli.exe C:\ --quarantine`
+
+## Code signing
+
+Release exes are signed with a self-signed certificate — see [`signing/README.md`](signing/README.md) for how to regenerate it or swap in a CA-issued certificate. A self-signed certificate proves the signature pipeline works and makes the exe tamper-evident, but it does **not** stop Windows SmartScreen warnings for anyone downloading the exe — only a certificate from a trusted CA does that, and those cost money and require identity verification.
 
 ## Status
 

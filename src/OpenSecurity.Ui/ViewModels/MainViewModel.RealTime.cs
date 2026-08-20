@@ -10,12 +10,8 @@ public sealed partial class MainViewModel
 {
     private const int MaxRealTimeDetections = 200;
 
-    private readonly string _settingsFilePath;
-    private readonly AppSettings _settings;
-    private readonly Action<bool>? _applyAutoStart;
     private RealTimeProtectionService? _realTimeService;
     private bool _isRealTimeProtectionEnabled;
-    private bool _startWithWindows;
 
     public ObservableCollection<string> WatchedFolders { get; } = new();
     public ObservableCollection<ScanRowViewModel> RealTimeDetections { get; } = new();
@@ -32,26 +28,11 @@ public sealed partial class MainViewModel
         }
     }
 
-    public bool StartWithWindows
-    {
-        get => _startWithWindows;
-        set
-        {
-            _startWithWindows = value;
-            _settings.StartWithWindows = value;
-            _settings.Save(_settingsFilePath);
-            _applyAutoStart?.Invoke(value);
-            OnPropertyChanged();
-        }
-    }
-
     private void InitializeRealTime()
     {
         var folders = _settings.WatchedFolders.Count > 0 ? _settings.WatchedFolders : AppSettings.DefaultWatchedFolders();
         foreach (var folder in folders)
             WatchedFolders.Add(folder);
-
-        _startWithWindows = _settings.StartWithWindows;
 
         if (_settings.RealTimeProtectionEnabled)
             StartRealTimeProtection();

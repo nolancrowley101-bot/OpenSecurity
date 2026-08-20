@@ -310,8 +310,10 @@
                                           VerticalAlignment="Center" />
                                 <CheckBox Content="Start with Windows" IsChecked="{Binding StartWithWindows}"
                                           VerticalAlignment="Center" Margin="24,0,0,0" />
+                                <CheckBox Content="'Scan with OpenSecurity' right-click menu" IsChecked="{Binding IsContextMenuEnabled}"
+                                          VerticalAlignment="Center" Margin="24,0,0,0" />
                             </StackPanel>
-                            <TextBlock Text="Watches the folders below and automatically scans new or changed files as they appear. User-mode only - not a kernel driver."
+                            <TextBlock Text="Watches the folders below and automatically scans new or changed files as they appear. User-mode only - not a kernel driver. The right-click menu adds a Scan with OpenSecurity entry to Explorer for files, folders, and drives (opens this window and scans immediately)."
                                        Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,8,0,10" TextWrapping="Wrap" />
 
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
