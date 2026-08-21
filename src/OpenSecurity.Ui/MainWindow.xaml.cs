@@ -1,6 +1,8 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using Application = System.Windows.Application;
 using Button = System.Windows.Controls.Button;
 using DragEventArgs = System.Windows.DragEventArgs;
@@ -34,6 +36,35 @@ public partial class MainWindow : Window
         {
             WindowState = WindowState.Minimized;
             ShowInTaskbar = false;
+        }
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        ApplyDarkTitleBar();
+    }
+
+    private void ApplyDarkTitleBar()
+    {
+        // Cosmetic only (native title bar to match the dark theme) - a failure here on an
+        // older Windows build must never affect the rest of the app, so swallow everything.
+        try
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var useDarkMode = 1;
+            const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+            const int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19;
+
+            if (DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int)) != 0)
+                DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ref useDarkMode, sizeof(int));
+        }
+        catch (Exception)
+        {
+            // ignored - decorative
         }
     }
 

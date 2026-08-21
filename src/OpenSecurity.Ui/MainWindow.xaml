@@ -23,11 +23,15 @@
 
                             <Border Grid.Column="0" Background="{Binding Verdict, Converter={StaticResource VerdictToBrushConverter}}"
                                     CornerRadius="4" Padding="8,3" HorizontalAlignment="Left">
-                                <TextBlock Text="{Binding VerdictLabel}" FontSize="11" FontWeight="Bold" Foreground="#FF14141A" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Verdict, Converter={StaticResource VerdictToIconConverter}}"
+                                               FontFamily="{StaticResource IconFont}" FontSize="11" Foreground="#FF14141A" Margin="0,0,4,0" />
+                                    <TextBlock Text="{Binding VerdictLabel}" FontSize="11" FontWeight="Bold" Foreground="#FF14141A" />
+                                </StackPanel>
                             </Border>
 
-                            <TextBlock Grid.Column="1" Text="{Binding FilePath}" VerticalAlignment="Center"
-                                       Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1" Text="{Binding FilePath}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                       VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
 
                             <TextBlock Grid.Column="2" Text="{Binding SizeLabel}"
                                        Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,10,0" />
@@ -47,7 +51,7 @@
                                                Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,6,0" />
                                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,0,6,0" />
                                     <TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondaryBrush}"
-                                               TextWrapping="Wrap" />
+                                               FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap" />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -208,90 +212,137 @@
                        VerticalAlignment="Center" />
         </Grid>
 
+        <!-- Scan sweep - the one signature motion cue, tied to the app's core action -->
+        <Border Grid.Row="5" Height="3" Margin="0,0,0,8" CornerRadius="2" Background="{StaticResource SurfaceAltBrush}"
+                ClipToBounds="True" Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibility}}">
+            <Border x:Name="SweepBar" Width="160" HorizontalAlignment="Left" CornerRadius="2">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="Transparent" Offset="0" />
+                        <GradientStop Color="{StaticResource AccentColor}" Offset="0.5" />
+                        <GradientStop Color="Transparent" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="SweepTransform" X="-160" />
+                </Border.RenderTransform>
+                <Border.Triggers>
+                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetName="SweepTransform" Storyboard.TargetProperty="X"
+                                                 From="-160" To="1000" Duration="0:0:1.4" RepeatBehavior="Forever" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Border.Triggers>
+            </Border>
+        </Border>
+
         <!-- Tabs -->
         <TabControl Grid.Row="6">
             <TabItem Header="Scan Results">
                 <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush2}"
                         BorderThickness="1" CornerRadius="8" Margin="0,8,0,0">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                        <ItemsControl ItemsSource="{Binding Results}" ItemTemplate="{StaticResource ScanRowTemplate}" />
-                    </ScrollViewer>
+                    <Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                            <ItemsControl ItemsSource="{Binding Results}" ItemTemplate="{StaticResource ScanRowTemplate}" />
+                        </ScrollViewer>
+                        <TextBlock Text="No scans yet - pick a file or folder above and hit Scan, or drag one onto this window."
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
+                                   Visibility="{Binding Results.Count, Converter={StaticResource EmptyCollectionToVisibility}}" />
+                    </Grid>
                 </Border>
             </TabItem>
 
             <TabItem Header="{Binding QuarantineEntries.Count, StringFormat='Quarantine ({0})'}">
                 <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush2}"
                         BorderThickness="1" CornerRadius="8" Margin="0,8,0,0">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                        <ItemsControl ItemsSource="{Binding QuarantineEntries}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1" Padding="10,8">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
+                    <Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                            <ItemsControl ItemsSource="{Binding QuarantineEntries}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1" Padding="10,8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
 
-                                            <StackPanel Grid.Column="0">
-                                                <TextBlock Text="{Binding OriginalPath}" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0">
-                                                    <Run Text="{Binding Reason, Mode=OneWay}" />
-                                                    <Run Text=" · " />
-                                                    <Run Text="{Binding TimestampLabel, Mode=OneWay}" />
-                                                </TextBlock>
-                                            </StackPanel>
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Text="{Binding OriginalPath}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0">
+                                                        <Run Text="{Binding Reason, Mode=OneWay}" />
+                                                        <Run Text=" · " />
+                                                        <Run Text="{Binding TimestampLabel, Mode=OneWay}" />
+                                                    </TextBlock>
+                                                </StackPanel>
 
-                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                                <Button Content="Restore" FontSize="11" Padding="8,4" Tag="{Binding}" Click="RestoreQuarantine_Click" />
-                                                <Button Content="Delete" FontSize="11" Padding="8,4" Margin="6,0,0,0" Tag="{Binding}" Click="DeleteQuarantine_Click" />
-                                            </StackPanel>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                    <Button Content="Restore" FontSize="11" Padding="8,4" Tag="{Binding}" Click="RestoreQuarantine_Click" />
+                                                    <Button Content="Delete" FontSize="11" Padding="8,4" Margin="6,0,0,0" Tag="{Binding}" Click="DeleteQuarantine_Click" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <TextBlock Text="Nothing in quarantine - files you quarantine will show up here, and can be restored anytime."
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
+                                   Visibility="{Binding QuarantineEntries.Count, Converter={StaticResource EmptyCollectionToVisibility}}" />
+                    </Grid>
                 </Border>
             </TabItem>
 
             <TabItem Header="History">
                 <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush2}"
                         BorderThickness="1" CornerRadius="8" Margin="0,8,0,0">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                        <ItemsControl ItemsSource="{Binding HistoryEntries}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1" Padding="10,8">
-                                        <Expander IsEnabled="{Binding HasFlaggedFiles}">
-                                            <Expander.Header>
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding TargetPath}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0">
-                                                        <Run Text="{Binding TimestampLabel, Mode=OneWay}" />
-                                                        <Run Text=" · " />
-                                                        <Run Text="{Binding SummaryLabel, Mode=OneWay}" />
-                                                    </TextBlock>
-                                                </StackPanel>
-                                            </Expander.Header>
+                    <Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                            <ItemsControl ItemsSource="{Binding HistoryEntries}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1" Padding="10,8">
+                                            <Expander IsEnabled="{Binding HasFlaggedFiles}">
+                                                <Expander.Header>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding TargetPath}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0">
+                                                            <Run Text="{Binding TimestampLabel, Mode=OneWay}" />
+                                                            <Run Text=" · " />
+                                                            <Run Text="{Binding SummaryLabel, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </Expander.Header>
 
-                                            <ItemsControl ItemsSource="{Binding FlaggedFiles}" Margin="0,8,0,0">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <StackPanel Orientation="Horizontal" Margin="16,3,0,3">
-                                                            <TextBlock Text="{Binding Verdict, StringFormat='[{0}]'}" FontWeight="SemiBold" Margin="0,0,6,0" />
-                                                            <TextBlock Text="{Binding FilePath}" Margin="0,0,6,0" />
-                                                            <TextBlock Text="{Binding TopFinding}" Foreground="{StaticResource TextSecondaryBrush}" />
-                                                        </StackPanel>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </Expander>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+                                                <ItemsControl ItemsSource="{Binding FlaggedFiles}" Margin="0,8,0,0">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel Orientation="Horizontal" Margin="16,3,0,3">
+                                                                <TextBlock Text="{Binding Verdict, StringFormat='[{0}]'}" FontWeight="SemiBold" Margin="0,0,6,0" />
+                                                                <TextBlock Text="{Binding FilePath}" FontFamily="{StaticResource MonoFont}" FontSize="12" Margin="0,0,6,0" />
+                                                                <TextBlock Text="{Binding TopFinding}" Foreground="{StaticResource TextSecondaryBrush}" />
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Expander>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <TextBlock Text="No scan history yet - run your first scan to start building a record."
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
+                                   Visibility="{Binding HistoryEntries.Count, Converter={StaticResource EmptyCollectionToVisibility}}" />
+                    </Grid>
                 </Border>
             </TabItem>
 
@@ -339,9 +390,15 @@
 
                     <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush2}"
                             BorderThickness="1" CornerRadius="8">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                            <ItemsControl ItemsSource="{Binding RealTimeDetections}" ItemTemplate="{StaticResource ScanRowTemplate}" />
-                        </ScrollViewer>
+                        <Grid>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                                <ItemsControl ItemsSource="{Binding RealTimeDetections}" ItemTemplate="{StaticResource ScanRowTemplate}" />
+                            </ScrollViewer>
+                            <TextBlock Text="No detections yet - files landing in your watched folders are scanned automatically and will show up here if anything's flagged."
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
+                                       Visibility="{Binding RealTimeDetections.Count, Converter={StaticResource EmptyCollectionToVisibility}}" />
+                        </Grid>
                     </Border>
                 </Grid>
             </TabItem>

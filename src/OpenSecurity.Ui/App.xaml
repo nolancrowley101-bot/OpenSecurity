@@ -10,7 +10,9 @@
             </ResourceDictionary.MergedDictionaries>
 
             <conv:VerdictToBrushConverter x:Key="VerdictToBrushConverter" />
+            <conv:VerdictToIconConverter x:Key="VerdictToIconConverter" />
             <conv:InverseBoolConverter x:Key="InverseBoolConverter" />
+            <conv:EmptyCollectionToVisibilityConverter x:Key="EmptyCollectionToVisibility" />
             <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         </ResourceDictionary>
     </Application.Resources>
