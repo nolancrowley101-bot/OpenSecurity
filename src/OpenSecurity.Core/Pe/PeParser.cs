@@ -4,7 +4,7 @@ namespace OpenSecurity.Core.Pe;
 
 /// <summary>
 /// Minimal, defensive PE (Portable Executable) header parser. Only extracts the fields
-/// needed for heuristic analysis (sections, imports, security directory presence).
+/// needed for heuristic analysis (sections, imports, security directory location/size).
 /// Never throws on malformed input — returns false instead, since scanned files may be
 /// truncated, corrupt, or deliberately malformed.
 /// </summary>
@@ -100,7 +100,10 @@ public static class PeParser
 
         var imports = ReadImports(reader, data, sections, importDir.Rva, is64Bit);
 
-        peFile = new PeFile(is64Bit, machine, entryPointRva, sizeOfImage, securityDir.Size > 0, sections, imports);
+        // Quirk: for the Security directory (unlike every other data directory), the "RVA" field
+        // is actually a raw file offset, not an RVA - the certificate table isn't mapped into memory.
+        peFile = new PeFile(is64Bit, machine, entryPointRva, sizeOfImage, securityDir.Size > 0,
+            securityDir.Rva, securityDir.Size, sections, imports);
         return true;
     }
 

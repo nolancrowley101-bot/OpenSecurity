@@ -29,4 +29,11 @@ public static class SuspiciousApis
     {
         "LoadLibraryA", "LoadLibraryW", "GetProcAddress", "LdrLoadDll"
     };
+
+    public static readonly IReadOnlySet<string> NetworkExfiltration = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "URLDownloadToFileA", "URLDownloadToFileW", "InternetOpenUrlA", "InternetOpenUrlW",
+        "InternetReadFile", "WinHttpOpen", "WinHttpConnect", "WinHttpSendRequest",
+        "HttpSendRequestA", "HttpSendRequestW", "socket", "connect", "send", "recv", "WSAStartup"
+    };
 }

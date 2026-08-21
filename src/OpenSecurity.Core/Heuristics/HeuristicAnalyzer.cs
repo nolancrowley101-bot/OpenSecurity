@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using OpenSecurity.Core.Pe;
 using OpenSecurity.Core.Scanning;
 
@@ -14,8 +16,10 @@ public sealed class HeuristicAnalyzer
     private const double HighEntropyThreshold = 7.2;
     private const int SuspiciousScoreThreshold = 30;
     private const int MaliciousScoreThreshold = 60;
+    private const long OverlayThresholdBytes = 1_048_576; // 1 MB - self-extracting installers legitimately have large overlays too, so this is a low-weight signal
 
-    public IEnumerable<ScanFinding> Analyze(PeFile pe, byte[] fileBytes)
+    /// <param name="filePath">Used only for Authenticode chain validation; pass null to skip that check (e.g. when only bytes are available).</param>
+    public IEnumerable<ScanFinding> Analyze(PeFile pe, byte[] fileBytes, string? filePath = null)
     {
         var score = 0;
         var reasons = new List<string>();
@@ -25,6 +29,11 @@ public sealed class HeuristicAnalyzer
             score += 5;
             reasons.Add("no embedded Authenticode signature");
         }
+        else if (filePath is not null && !IsAuthenticodeChainTrusted(filePath))
+        {
+            score += 15;
+            reasons.Add("Authenticode signature present but does not chain to a trusted root (self-signed, expired, or tampered)");
+        }
 
         foreach (var section in pe.Sections)
         {
@@ -32,6 +41,12 @@ public sealed class HeuristicAnalyzer
             {
                 score += 20;
                 reasons.Add($"section '{section.Name}' is both writable and executable");
+            }
+
+            if (PackerSignatures.KnownPackerSectionNames.Contains(section.Name))
+            {
+                score += 20;
+                reasons.Add($"section name '{section.Name}' matches a known packer/protector");
             }
 
             if (section.RawSize > 0 && section.PointerToRawData + section.RawSize <= fileBytes.Length)
@@ -50,6 +65,13 @@ public sealed class HeuristicAnalyzer
         {
             score += 10;
             reasons.Add("no sections found");
+        }
+
+        var overlaySize = ComputeOverlaySize(pe, fileBytes);
+        if (overlaySize >= OverlayThresholdBytes)
+        {
+            score += 8;
+            reasons.Add($"{overlaySize:N0} bytes of data appended after the last section/signature (overlay) - can indicate a bundled payload");
         }
 
         var importedNames = pe.Imports.Select(i => i.FunctionName).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -82,6 +104,19 @@ public sealed class HeuristicAnalyzer
             reasons.Add("relies almost entirely on dynamic API resolution (LoadLibrary/GetProcAddress) with few static imports");
         }
 
+        var networkHits = importedNames.Count(n => SuspiciousApis.NetworkExfiltration.Contains(n));
+        if (networkHits >= 2)
+        {
+            score += 10;
+            reasons.Add($"imports {networkHits} network API(s)");
+        }
+
+        if (networkHits >= 1 && injectionHits >= 1)
+        {
+            score += 20;
+            reasons.Add("combines network access with process-injection APIs - a common backdoor/RAT pattern");
+        }
+
         if (score == 0)
             yield break;
 
@@ -100,5 +135,40 @@ public sealed class HeuristicAnalyzer
             Name: "heuristic-pe-analysis",
             Detail: string.Join("; ", reasons) + $" (score: {score})",
             Score: score);
+    }
+
+    private static long ComputeOverlaySize(PeFile pe, byte[] fileBytes)
+    {
+        long accountedEnd = pe.Sections.Count > 0
+            ? pe.Sections.Max(s => (long)s.PointerToRawData + s.RawSize)
+            : 0;
+
+        if (pe.HasSecurityDirectory)
+            accountedEnd = Math.Max(accountedEnd, (long)pe.SecurityDirectoryFileOffset + pe.SecurityDirectorySize);
+
+        return Math.Max(0, fileBytes.LongLength - accountedEnd);
+    }
+
+    private static bool IsAuthenticodeChainTrusted(string filePath)
+    {
+        try
+        {
+            // CreateFromSignedFile is obsolete (SYSLIB0057) for general cert loading, but
+            // X509CertificateLoader has no equivalent for extracting the Authenticode signer
+            // embedded in a signed PE - this remains the correct API for that specific purpose.
+#pragma warning disable SYSLIB0057
+            using var signerCert = X509Certificate.CreateFromSignedFile(filePath);
+#pragma warning restore SYSLIB0057
+            using var cert2 = new X509Certificate2(signerCert);
+            using var chain = new X509Chain();
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+            return chain.Build(cert2);
+        }
+        catch (Exception ex) when (ex is CryptographicException or IOException)
+        {
+            // Signature present but unparseable/corrupt - treat the same as "not trusted"
+            // rather than silently skipping, since a malformed signature is itself suspicious.
+            return false;
+        }
     }
 }

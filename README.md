@@ -4,13 +4,25 @@ An on-demand malware scanner for Windows, built from scratch in C#/.NET.
 
 By **Nolan Crowley**. Open source under the [MIT License](LICENSE).
 
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind — see the [MIT License](LICENSE) for the full legal text. It's a personal/educational project, **not a substitute for a commercial antivirus product**, and detection is never guaranteed to be complete or accurate.
+
+**Nolan Crowley is not responsible for:**
+- Malware infections, data loss, or any other damage to your computer, files, or accounts, whether or not OpenSecurity was installed or running at the time
+- Any misuse of this software, including use for any purpose other than scanning your own systems with authorization
+
+Use it at your own risk, keep independent backups of anything important, and don't rely on it as your only line of defense.
+
 ## What it does
 
-OpenSecurity scans a file, folder, or entire drive using three detection layers:
+OpenSecurity scans a file, folder, archive, or entire drive using several detection layers:
 
 - **Hash signatures** — SHA-256 exact match against a known-bad hash list (`signatures/hashes.txt`)
-- **Pattern rules** — simplified YARA-style string/hex matching (`rules/*.yar`)
-- **Heuristics** — a from-scratch PE (Portable Executable) header parser that scores packing signs (high-entropy sections), RWX sections, missing Authenticode signatures, and suspicious API imports (process injection, anti-debugging, credential access)
+- **Pattern rules** — simplified YARA-style string/hex matching (`rules/*.yar`) — 10 built-in rules covering EICAR, PowerShell/AMSI abuse, webshells, script downloaders, living-off-the-land binary abuse, ransom-note language, and Office macro auto-exec patterns
+- **Heuristics** — a from-scratch PE (Portable Executable) header parser that scores packing signs (high-entropy sections, known packer section names like UPX/ASPack/Themida), RWX sections, overlay data (bytes appended past the last section), suspicious API imports (process injection, anti-debugging, credential access, network/exfiltration — and combinations like network + injection APIs together, a common backdoor pattern)
+- **Authenticode validation** — not just "is it signed", but whether the signature actually chains to a trusted root certificate; a self-signed or tampered signature is scored differently than a properly CA-signed one
+- **Archive scanning** — `.zip` files are opened and every entry inside is scanned with the same pipeline, with zip-bomb guards (per-entry and total decompressed size caps, entry count cap)
 
 No external antivirus/YARA native dependencies — everything is self-contained managed code.
 

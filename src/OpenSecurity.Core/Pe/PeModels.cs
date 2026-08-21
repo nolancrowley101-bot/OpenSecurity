@@ -14,5 +14,7 @@ public sealed record PeFile(
     uint EntryPointRva,
     uint SizeOfImage,
     bool HasSecurityDirectory,
+    uint SecurityDirectoryFileOffset,
+    uint SecurityDirectorySize,
     IReadOnlyList<PeSection> Sections,
     IReadOnlyList<PeImport> Imports);
