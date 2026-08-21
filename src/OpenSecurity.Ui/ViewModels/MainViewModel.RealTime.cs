@@ -28,6 +28,17 @@ public sealed partial class MainViewModel
         }
     }
 
+    public bool AutoQuarantineOnDetect
+    {
+        get => _settings.AutoQuarantineOnDetect;
+        set
+        {
+            _settings.AutoQuarantineOnDetect = value;
+            _settings.Save(_settingsFilePath);
+            OnPropertyChanged();
+        }
+    }
+
     private void InitializeRealTime()
     {
         var folders = _settings.WatchedFolders.Count > 0 ? _settings.WatchedFolders : AppSettings.DefaultWatchedFolders();
@@ -101,6 +112,18 @@ public sealed partial class MainViewModel
 
     private void OnRealTimeThreatDetected(ScanResult result)
     {
+        // No kernel-mode filter driver means execution itself can't be blocked the way
+        // SmartScreen or a real AV's minifilter does - but a Malicious-verdict file (the
+        // highest-confidence tier: an exact hash match, or heuristics crossing the malicious
+        // threshold on multiple combined signals) can be moved out of reach before the user
+        // gets a chance to double-click it. Quarantine is reversible via the Quarantine tab,
+        // so this errs toward acting rather than just logging a detection nobody may notice.
+        if (_settings.AutoQuarantineOnDetect && result.OverallVerdict == Verdict.Malicious)
+        {
+            var reason = string.Join("; ", result.Findings.Select(f => f.Name));
+            _quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
+        }
+
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
             RealTimeDetections.Insert(0, new ScanRowViewModel(result));

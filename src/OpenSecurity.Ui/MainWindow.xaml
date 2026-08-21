@@ -368,7 +368,11 @@
                                 <CheckBox Content="'Scan with OpenSecurity' right-click menu" IsChecked="{Binding IsContextMenuEnabled}"
                                           VerticalAlignment="Center" Margin="24,0,0,0" />
                             </StackPanel>
-                            <TextBlock Text="Watches the folders below and automatically scans new or changed files as they appear. User-mode only - not a kernel driver. The right-click menu adds a Scan with OpenSecurity entry to Explorer for files, folders, and drives (opens this window and scans immediately)."
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <CheckBox Content="Auto-quarantine Malicious detections" IsChecked="{Binding AutoQuarantineOnDetect}"
+                                          VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="Watches the folders below and automatically scans new or changed files as they appear. User-mode only - not a kernel driver, so it can't block execution outright the way SmartScreen does; auto-quarantine closes most of that gap by moving a high-confidence detection out of reach before you'd get a chance to run it (reversible any time from the Quarantine tab). The right-click menu adds a Scan with OpenSecurity entry to Explorer for files, folders, and drives (opens this window and scans immediately)."
                                        Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,8,0,10" TextWrapping="Wrap" />
 
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">

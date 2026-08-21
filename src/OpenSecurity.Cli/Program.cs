@@ -301,7 +301,11 @@ public static class Program
 
     private static int RunWatch(string[] args)
     {
-        var folders = args.Length > 0 ? args.ToList() : OpenSecurity.Core.Settings.AppSettings.DefaultWatchedFolders();
+        var quarantine = args.Contains("--quarantine");
+        var folders = args.Where(a => a != "--quarantine").ToList();
+        if (folders.Count == 0)
+            folders = OpenSecurity.Core.Settings.AppSettings.DefaultWatchedFolders();
+
         var missing = folders.Where(f => !Directory.Exists(f)).ToList();
         if (missing.Count > 0)
         {
@@ -314,12 +318,15 @@ public static class Program
         var rulesDir = DefaultPaths.FindUp(appDir, "rules");
         var allowlistPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "allowlist.txt"));
         var archivePasswordsPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "archive_passwords.txt"));
+        var fuzzyHashesPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "fuzzy_hashes.txt"));
 
         var hashDb = hashDbPath is not null ? HashSignatureDatabase.Load(hashDbPath) : HashSignatureDatabase.Empty();
         var rules = rulesDir is not null ? PatternRuleParser.ParseDirectory(rulesDir) : new List<PatternRule>();
         var allowlist = allowlistPath is not null ? HashSignatureDatabase.Load(allowlistPath) : HashSignatureDatabase.Empty();
         var archivePasswords = archivePasswordsPath is not null ? ArchivePasswordList.Load(archivePasswordsPath) : new List<string>();
-        var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist, archivePasswords);
+        var fuzzySignatures = fuzzyHashesPath is not null ? FuzzySignatureDatabase.Load(fuzzyHashesPath) : FuzzySignatureDatabase.Empty();
+        var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist, archivePasswords, fuzzySignatures);
+        var quarantineManager = new QuarantineManager(DefaultPaths.DefaultQuarantineDirectory());
 
         using var service = new RealTimeProtectionService(engine);
         service.FileScanned += result => Console.WriteLine($"[scanned]    {result.FilePath} -> {result.OverallVerdict}");
@@ -328,10 +335,17 @@ public static class Program
             Console.WriteLine($"[{result.OverallVerdict.ToString().ToUpperInvariant()}]  {result.FilePath}");
             foreach (var finding in result.Findings)
                 Console.WriteLine($"    - [{finding.Source}] {finding.Name}: {finding.Detail}");
+
+            if (quarantine && result.OverallVerdict == Verdict.Malicious)
+            {
+                var reason = string.Join("; ", result.Findings.Select(f => f.Name));
+                var entry = quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
+                Console.WriteLine($"    -> quarantined (id: {entry.Id})");
+            }
         };
 
         service.Start(folders);
-        Console.WriteLine($"Watching {folders.Count} folder(s) for real-time protection. Press Ctrl+C to stop.");
+        Console.WriteLine($"Watching {folders.Count} folder(s) for real-time protection{(quarantine ? ", auto-quarantining Malicious detections" : "")}. Press Ctrl+C to stop.");
         foreach (var folder in folders)
             Console.WriteLine($"  - {folder}");
 
@@ -368,7 +382,7 @@ public static class Program
               OpenSecurity.Cli schedule enable <path> [--frequency daily|weekly] [--time HH:mm] [--quarantine]
               OpenSecurity.Cli schedule disable
               OpenSecurity.Cli schedule status
-              OpenSecurity.Cli watch [folder...]
+              OpenSecurity.Cli watch [folder...] [--quarantine]
 
             Options:
               --recursive, -r      Scan directories recursively (default: on for directories)

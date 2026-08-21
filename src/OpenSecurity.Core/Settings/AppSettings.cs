@@ -4,9 +4,19 @@ namespace OpenSecurity.Core.Settings;
 
 public sealed class AppSettings
 {
-    public bool RealTimeProtectionEnabled { get; set; }
+    // On by default (like commercial AV real-time protection and SmartScreen) rather than
+    // opt-in, so a fresh install is actually protected without the user needing to find and
+    // flip two separate switches first. Existing installs keep whatever they already saved,
+    // since these defaults only apply when there's no settings.json yet to load.
+    public bool RealTimeProtectionEnabled { get; set; } = true;
     public List<string> WatchedFolders { get; set; } = new();
-    public bool StartWithWindows { get; set; }
+    public bool StartWithWindows { get; set; } = true;
+
+    // A minifilter driver could block execution outright; without one, immediately moving a
+    // high-confidence (Malicious, not just Suspicious) real-time detection to quarantine is
+    // the closest user-mode equivalent - it shrinks the window between "file lands on disk"
+    // and "user double-clicks it" down to the ~2 second detection debounce.
+    public bool AutoQuarantineOnDetect { get; set; } = true;
 
     public static List<string> DefaultWatchedFolders()
     {

@@ -44,5 +44,12 @@ public sealed partial class MainViewModel
     {
         _startWithWindows = _settings.StartWithWindows;
         _isContextMenuEnabled = ContextMenuManager.IsRegistered();
+
+        // Re-apply on every launch rather than only when the checkbox is toggled, so the Run
+        // key registration self-heals if it was ever cleared externally (a Windows update, a
+        // cleanup tool, a manual edit) without silently leaving the saved setting and actual
+        // registration out of sync.
+        if (_startWithWindows)
+            _applyAutoStart?.Invoke(true);
     }
 }

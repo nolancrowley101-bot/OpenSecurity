@@ -6,8 +6,6 @@ By **Nolan Crowley**. Open source under the [MIT License](LICENSE).
 
 ## Disclaimer
 
-This software is provided "as is", without warranty of any kind — see the [MIT License](LICENSE) for the full legal text. It's a personal/educational project, **not a substitute for a commercial antivirus product**, and detection is never guaranteed to be complete or accurate.
-
 **Nolan Crowley is not responsible for:**
 - Malware infections, data loss, or any other damage to your computer, files, or accounts, whether or not OpenSecurity was installed or running at the time
 - Any misuse of this software, including use for any purpose other than scanning your own systems with authorization
@@ -37,8 +35,8 @@ Beyond detection, it also has:
 - **Scan history** — every scan is logged locally so you can look back at what was found and when
 - **Exportable reports** — save a completed scan's results as JSON or CSV
 - **Scheduled scanning** — set up a recurring scan via Windows Task Scheduler, no need to keep the app running
-- **Real-time protection** — a user-mode folder watcher scans new/changed files as they land in chosen folders (Downloads, Desktop, temp by default); not a kernel-mode driver, but no admin rights or signed driver needed either
-- **System tray** — runs quietly in the tray, with an optional "start with Windows" toggle so real-time protection is actually always on
+- **Real-time protection** — on by default (a fresh install is protected without touching any settings), a user-mode folder watcher scans new/changed files as they land in chosen folders (Downloads, Desktop, temp by default). A Malicious-verdict detection is auto-quarantined immediately rather than just logged, closing most of the gap between "file lands on disk" and "user double-clicks it" - the closest a user-mode watcher (not a kernel-mode driver, no admin rights or signed driver needed) can get to SmartScreen-style blocking. Reversible any time from the Quarantine tab. The CLI has the same thing: `OpenSecurity.Cli.exe watch [folder...] --quarantine`
+- **System tray** — runs quietly in the tray by default, launching automatically at Windows login (a standard per-user Run-key registration, not a system service - no admin rights needed, but it starts at your login, not at raw system boot before anyone signs in) so real-time protection is actually always on. Both this and real-time protection can be turned off from Settings if you'd rather run scans on demand
 - **Explorer integration** — an optional "Scan with OpenSecurity" right-click entry for files, folders, and drives, which opens the app and scans immediately
 - **Code signing** — release exes are signed (see [Code signing](#code-signing) below for what that does and doesn't get you)
 
@@ -98,7 +96,7 @@ OpenSecurity.Cli.exe list-history
 OpenSecurity.Cli.exe schedule enable <path> [--frequency daily|weekly] [--time HH:mm] [--quarantine]
 OpenSecurity.Cli.exe schedule disable
 OpenSecurity.Cli.exe schedule status
-OpenSecurity.Cli.exe watch [folder...]     # real-time protection in the foreground
+OpenSecurity.Cli.exe watch [folder...] [--quarantine]     # real-time protection in the foreground
 ```
 
 To scan an entire drive, just point it at the root: `OpenSecurity.Cli.exe C:\ --quarantine`
