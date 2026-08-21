@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using OpenSecurity.Core.MachO;
 using OpenSecurity.Core.Pe;
 using OpenSecurity.Core.Scanning;
 
@@ -133,6 +134,75 @@ public sealed class HeuristicAnalyzer
             Source: "heuristic",
             Verdict: verdict,
             Name: "heuristic-pe-analysis",
+            Detail: string.Join("; ", reasons) + $" (score: {score})",
+            Score: score);
+    }
+
+    /// <summary>Same structural-heuristic approach as <see cref="Analyze"/>, applied to Mach-O
+    /// (macOS) binaries instead of PE: no code signature, RWX segments, high-entropy segments,
+    /// and dylibs loaded from unusual locations. There's no macOS equivalent of the Windows
+    /// import-table API checks (Mach-O binaries mostly call through dynamically-bound symbols
+    /// that aren't statically enumerable the same way), so this covers structural signals only.</summary>
+    public IEnumerable<ScanFinding> AnalyzeMachO(MachOFile machO, byte[] fileBytes)
+    {
+        var score = 0;
+        var reasons = new List<string>();
+
+        if (!machO.HasCodeSignature)
+        {
+            score += 5;
+            reasons.Add("no embedded code signature");
+        }
+
+        foreach (var segment in machO.Segments)
+        {
+            if (segment.IsExecutable && segment.IsWritable)
+            {
+                score += 20;
+                reasons.Add($"segment '{segment.Name}' is both writable and executable");
+            }
+
+            if (segment.FileSize > 0 && segment.FileOffset + (long)segment.FileSize <= fileBytes.Length)
+            {
+                var segmentBytes = fileBytes.AsSpan((int)segment.FileOffset, (int)segment.FileSize);
+                var entropy = Entropy.Shannon(segmentBytes);
+                if (entropy >= HighEntropyThreshold)
+                {
+                    score += 15;
+                    reasons.Add($"segment '{segment.Name}' has high entropy ({entropy:F2}) suggesting packing/encryption");
+                }
+            }
+        }
+
+        if (machO.Segments.Count == 0)
+        {
+            score += 10;
+            reasons.Add("no segments found");
+        }
+
+        var suspiciousDylibs = machO.LoadedDylibs.Where(MachOHeuristics.IsSuspiciousDylibPath).ToList();
+        if (suspiciousDylibs.Count > 0)
+        {
+            score += 20;
+            reasons.Add($"links {suspiciousDylibs.Count} dylib(s) from an unusual location: {string.Join(", ", suspiciousDylibs.Take(3))}");
+        }
+
+        if (score == 0)
+            yield break;
+
+        var verdict = score >= MaliciousScoreThreshold
+            ? Verdict.Malicious
+            : score >= SuspiciousScoreThreshold
+                ? Verdict.Suspicious
+                : Verdict.Clean;
+
+        if (verdict == Verdict.Clean)
+            yield break;
+
+        yield return new ScanFinding(
+            Source: "heuristic",
+            Verdict: verdict,
+            Name: "heuristic-macho-analysis",
             Detail: string.Join("; ", reasons) + $" (score: {score})",
             Score: score);
     }

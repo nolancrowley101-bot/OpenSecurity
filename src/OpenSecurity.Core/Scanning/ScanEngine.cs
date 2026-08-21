@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using OpenSecurity.Core.Hashing;
 using OpenSecurity.Core.Heuristics;
+using OpenSecurity.Core.MachO;
 using OpenSecurity.Core.Pe;
 using OpenSecurity.Core.Rules;
 using SharpCompress.Archives;
@@ -13,21 +15,26 @@ public sealed class ScanEngine
     private const int MaxArchiveEntries = 2000;
     private const long MaxArchiveEntryBytes = 50L * 1024 * 1024; // per-entry cap, smaller than the top-level cap since archives are more zip-bomb-prone
     private const long MaxArchiveTotalBytes = 500L * 1024 * 1024; // total decompressed budget across the whole archive
+    private const int MaxArchiveDepth = 5; // archive-in-archive-in-archive... guard against unbounded recursion/zip bombs
+    private const int FuzzyMatchThreshold = 70; // 0-100 similarity score; below this, two files are treated as unrelated
 
     private readonly HashScanner _hashScanner;
     private readonly PatternRuleEngine _ruleEngine;
     private readonly HeuristicAnalyzer _heuristicAnalyzer;
     private readonly HashSignatureDatabase _allowlist;
     private readonly IReadOnlyList<string> _archivePasswords;
+    private readonly FuzzySignatureDatabase _fuzzySignatures;
 
     public ScanEngine(HashScanner hashScanner, PatternRuleEngine ruleEngine, HeuristicAnalyzer heuristicAnalyzer,
-        HashSignatureDatabase? allowlist = null, IReadOnlyList<string>? archivePasswords = null)
+        HashSignatureDatabase? allowlist = null, IReadOnlyList<string>? archivePasswords = null,
+        FuzzySignatureDatabase? fuzzySignatures = null)
     {
         _hashScanner = hashScanner;
         _ruleEngine = ruleEngine;
         _heuristicAnalyzer = heuristicAnalyzer;
         _allowlist = allowlist ?? HashSignatureDatabase.Empty();
         _archivePasswords = archivePasswords ?? Array.Empty<string>();
+        _fuzzySignatures = fuzzySignatures ?? FuzzySignatureDatabase.Empty();
     }
 
     public ScanResult ScanFile(string path)
@@ -70,7 +77,12 @@ public sealed class ScanEngine
         return result;
     }
 
-    public IEnumerable<ScanResult> ScanDirectory(string directoryPath, bool recursive = true)
+    /// <summary>Scans every file under a directory, running scans across multiple CPU cores in
+    /// parallel (bounded by <paramref name="maxDegreeOfParallelism"/>, defaulting to the machine's
+    /// core count) while still streaming results back as they complete, so callers driving a live
+    /// UI keep getting incremental updates instead of waiting for the whole directory to finish.
+    /// Results arrive in completion order, not filesystem order.</summary>
+    public IEnumerable<ScanResult> ScanDirectory(string directoryPath, bool recursive = true, int? maxDegreeOfParallelism = null)
     {
         if (!Directory.Exists(directoryPath))
         {
@@ -80,20 +92,38 @@ public sealed class ScanEngine
             yield break;
         }
 
-        foreach (var file in ResilientFileWalker.EnumerateFiles(directoryPath, recursive))
+        using var results = new BlockingCollection<ScanResult>(boundedCapacity: 64);
+
+        var producer = Task.Run(() =>
         {
-            ScanResult result;
             try
             {
-                result = ScanFile(file);
+                var options = new ParallelOptions { MaxDegreeOfParallelism = maxDegreeOfParallelism ?? Math.Max(1, Environment.ProcessorCount) };
+                Parallel.ForEach(ResilientFileWalker.EnumerateFiles(directoryPath, recursive), options, file =>
+                {
+                    ScanResult result;
+                    try
+                    {
+                        result = ScanFile(file);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        result = new ScanResult { FilePath = file, FileSizeBytes = 0, Sha256 = "" };
+                        result.Findings.Add(new ScanFinding("engine", Verdict.Error, "scan-error", ex.Message, 0));
+                    }
+                    results.Add(result);
+                });
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            finally
             {
-                result = new ScanResult { FilePath = file, FileSizeBytes = 0, Sha256 = "" };
-                result.Findings.Add(new ScanFinding("engine", Verdict.Error, "scan-error", ex.Message, 0));
+                results.CompleteAdding();
             }
+        });
+
+        foreach (var result in results.GetConsumingEnumerable())
             yield return result;
-        }
+
+        producer.GetAwaiter().GetResult(); // re-throw anything Parallel.ForEach itself couldn't hand off per-item
     }
 
     /// <summary>Runs the hash/allowlist/rule/heuristic pipeline against a blob of bytes, whether it's
@@ -104,17 +134,33 @@ public sealed class ScanEngine
         var sha256 = HashScanner.ComputeSha256(new MemoryStream(bytes));
         var findings = new List<ScanFinding>();
 
-        findings.AddRange(_hashScanner.Scan(sha256));
+        var exactHashFindings = _hashScanner.Scan(sha256).ToList();
+        findings.AddRange(exactHashFindings);
 
         // An explicit known-malicious hash match always stands; the allowlist only suppresses
         // the noisier pattern-rule/heuristic layers, so it can't be used to hide a blacklisted file.
         if (_allowlist.TryMatch(sha256, out _))
             return (sha256, findings);
 
+        // Fuzzy (context-triggered piecewise) hashing catches near-duplicates - a recompiled
+        // sample or a repacked installer - that an exact SHA-256 match would miss entirely.
+        // Skipped when an exact match already fired, since that's a stronger, cheaper result.
+        if (exactHashFindings.Count == 0 && _fuzzySignatures.Count > 0)
+        {
+            var fuzzyHash = FuzzyHash.Compute(bytes);
+            foreach (var (label, score) in _fuzzySignatures.FindSimilar(fuzzyHash, FuzzyMatchThreshold))
+            {
+                findings.Add(new ScanFinding("fuzzy-hash", Verdict.Suspicious, label,
+                    $"{score}% similar to known-malicious sample signature", score));
+            }
+        }
+
         findings.AddRange(_ruleEngine.Scan(bytes));
 
         if (PeParser.TryParse(bytes, out var peFile) && peFile is not null)
             findings.AddRange(_heuristicAnalyzer.Analyze(peFile, bytes, filePathForAuthenticode));
+        else if (MachOParser.TryParse(bytes, out var machOFile) && machOFile is not null)
+            findings.AddRange(_heuristicAnalyzer.AnalyzeMachO(machOFile, bytes));
 
         return (sha256, findings);
     }
@@ -136,8 +182,15 @@ public sealed class ScanEngine
     /// every entry with the same pipeline as a real file. Tries no password first, then each
     /// entry in the configured password list, so it also handles unencrypted archives cheaply.
     /// </summary>
-    private void ScanArchiveEntries(byte[] archiveBytes, ScanResult result)
+    private void ScanArchiveEntries(byte[] archiveBytes, ScanResult result, int depth = 0, string entryPathPrefix = "")
     {
+        if (depth >= MaxArchiveDepth)
+        {
+            result.Findings.Add(new ScanFinding("archive", Verdict.Error, "archive-too-deep",
+                $"[{entryPathPrefix}] stopped after {MaxArchiveDepth} nested archive levels", 0));
+            return;
+        }
+
         var candidatePasswords = new List<string?> { null };
         candidatePasswords.AddRange(_archivePasswords);
         Exception? lastFailure = null;
@@ -191,7 +244,7 @@ public sealed class ScanEngine
                 if (firstEntryBytes is not null)
                 {
                     totalBytesRead += firstEntryBytes.LongLength;
-                    ScoreArchiveEntry(entries[0].Key ?? "?", firstEntryBytes, result);
+                    ProcessEntry(entries[0].Key ?? "?", firstEntryBytes, result, depth, entryPathPrefix);
                 }
                 else
                 {
@@ -243,7 +296,7 @@ public sealed class ScanEngine
                     }
 
                     totalBytesRead += entryBytes.LongLength;
-                    ScoreArchiveEntry(entry.Key ?? "?", entryBytes, result);
+                    ProcessEntry(entry.Key ?? "?", entryBytes, result, depth, entryPathPrefix);
                 }
 
                 return; // found a working password (or the archive wasn't encrypted) - done
@@ -262,11 +315,21 @@ public sealed class ScanEngine
         }
     }
 
-    private void ScoreArchiveEntry(string entryName, byte[] entryBytes, ScanResult result)
+    /// <summary>Scores one archive entry against the full pipeline, then - if the entry is itself
+    /// an archive (a zip nested inside a zip, common when malware collections repackage third-party
+    /// installers) - recurses into it too, up to <see cref="MaxArchiveDepth"/> levels deep. Entry
+    /// names accumulate into a "outer.zip > inner.zip > payload.exe" path so nested findings stay
+    /// traceable to where they actually live.</summary>
+    private void ProcessEntry(string entryName, byte[] entryBytes, ScanResult result, int depth, string pathPrefix)
     {
+        var fullName = string.IsNullOrEmpty(pathPrefix) ? entryName : $"{pathPrefix} > {entryName}";
+
         var (_, entryFindings) = ScanContent(entryBytes, null);
         foreach (var finding in entryFindings)
-            result.Findings.Add(new ScanFinding("archive", finding.Verdict, finding.Name, $"[{entryName}] {finding.Detail}", finding.Score));
+            result.Findings.Add(new ScanFinding("archive", finding.Verdict, finding.Name, $"[{fullName}] {finding.Detail}", finding.Score));
+
+        if (IsSupportedArchiveMagic(entryBytes))
+            ScanArchiveEntries(entryBytes, result, depth + 1, fullName);
     }
 
     /// <summary>Retries a single archive entry (matched by key) against every password other than

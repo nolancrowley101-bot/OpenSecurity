@@ -19,9 +19,10 @@ public partial class App : Application
         var rulesDir = DefaultPaths.FindUp(appDir, "rules") ?? Path.Combine(appDir, "rules");
         var allowlistPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "allowlist.txt")) ?? Path.Combine(appDir, "signatures", "allowlist.txt");
         var archivePasswordsPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "archive_passwords.txt")) ?? Path.Combine(appDir, "signatures", "archive_passwords.txt");
+        var fuzzyHashesPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "fuzzy_hashes.txt")) ?? Path.Combine(appDir, "signatures", "fuzzy_hashes.txt");
 
         var viewModel = new MainViewModel(
-            hashDbPath, rulesDir, allowlistPath, archivePasswordsPath,
+            hashDbPath, rulesDir, allowlistPath, archivePasswordsPath, fuzzyHashesPath,
             DefaultPaths.DefaultQuarantineDirectory(),
             DefaultPaths.DefaultHistoryFilePath(),
             DefaultPaths.DefaultSettingsFilePath(),

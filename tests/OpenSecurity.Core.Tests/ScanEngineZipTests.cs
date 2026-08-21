@@ -177,4 +177,66 @@ public class ScanEngineZipTests : IDisposable
         Assert.Contains(result.Findings, f => f.Source == "archive" && f.Detail.Contains("payload_a.txt"));
         Assert.DoesNotContain(result.Findings, f => f.Source == "archive" && f.Name == "entry-read-error");
     }
+
+    [Fact]
+    public void ScanFile_ZipContainingNestedZip_RecursesIntoInnerArchive()
+    {
+        // Malware collections routinely repackage third-party installers as zips inside a
+        // curated zip (seen for real in InstallCap.zip during v1.7.0 validation) - the payload
+        // living two archive levels deep must still be scanned, not just hashed as opaque bytes.
+        var innerPath = Path.Combine(Path.GetTempPath(), "OpenSecurityTests_inner_" + Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            using (var innerZip = ZipFile.Open(innerPath, ZipArchiveMode.Create))
+            using (var writer = new StreamWriter(innerZip.CreateEntry("deep_payload.txt").Open()))
+                writer.Write("contains TESTMARKER inside");
+
+            using (var outerZip = ZipFile.Open(_tempFile, ZipArchiveMode.Create))
+                outerZip.CreateEntryFromFile(innerPath, "inner.zip");
+
+            var result = MakeEngine().ScanFile(_tempFile);
+
+            Assert.Equal(Verdict.Malicious, result.OverallVerdict);
+            Assert.Contains(result.Findings, f => f.Source == "archive"
+                && f.Detail.Contains("inner.zip") && f.Detail.Contains("deep_payload.txt"));
+        }
+        finally
+        {
+            File.Delete(innerPath);
+        }
+    }
+
+    [Fact]
+    public void ScanFile_DeeplyNestedZips_StopsAtDepthGuardInsteadOfRecursingForever()
+    {
+        var scratchDir = Path.Combine(Path.GetTempPath(), "OpenSecurityTests_nest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(scratchDir);
+        try
+        {
+            // 8 levels deep, well past the engine's recursion cap - must terminate cleanly
+            // rather than blow the stack or loop forever on a maliciously self-nesting archive.
+            var currentPath = Path.Combine(scratchDir, "level0.zip");
+            using (var zip = ZipFile.Open(currentPath, ZipArchiveMode.Create))
+            using (var writer = new StreamWriter(zip.CreateEntry("payload.txt").Open()))
+                writer.Write("contains TESTMARKER inside");
+
+            for (var level = 1; level <= 8; level++)
+            {
+                var nextPath = Path.Combine(scratchDir, $"level{level}.zip");
+                using (var zip = ZipFile.Open(nextPath, ZipArchiveMode.Create))
+                    zip.CreateEntryFromFile(currentPath, "inner.zip");
+                currentPath = nextPath;
+            }
+
+            File.Copy(currentPath, _tempFile, overwrite: true);
+
+            var exception = Record.Exception(() => MakeEngine().ScanFile(_tempFile));
+
+            Assert.Null(exception);
+        }
+        finally
+        {
+            Directory.Delete(scratchDir, recursive: true);
+        }
+    }
 }

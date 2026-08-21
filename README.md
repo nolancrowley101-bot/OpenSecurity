@@ -19,12 +19,14 @@ Use it at your own risk, keep independent backups of anything important, and don
 OpenSecurity scans a file, folder, archive, or entire drive using several detection layers:
 
 - **Hash signatures** — SHA-256 exact match against a known-bad hash list (`signatures/hashes.txt`)
+- **Fuzzy hashing** — a self-contained context-triggered piecewise hashing (CTPH) implementation, the technique behind ssdeep (`signatures/fuzzy_hashes.txt`). Unlike SHA-256, a recompiled build or repacked installer that shares most of its content with a known-bad sample still scores a high similarity match, so near-duplicate variants get caught even when no exact hash matches
 - **Pattern rules** — simplified YARA-style string/hex matching (`rules/*.yar`) — 10 built-in rules covering EICAR, PowerShell/AMSI abuse, webshells, script downloaders, living-off-the-land binary abuse, ransom-note language, and Office macro auto-exec patterns
-- **Heuristics** — a from-scratch PE (Portable Executable) header parser that scores packing signs (high-entropy sections, known packer section names like UPX/ASPack/Themida), RWX sections, overlay data (bytes appended past the last section), suspicious API imports (process injection, anti-debugging, credential access, network/exfiltration — and combinations like network + injection APIs together, a common backdoor pattern)
+- **PE heuristics** — a from-scratch PE (Portable Executable) header parser that scores packing signs (high-entropy sections, known packer section names like UPX/ASPack/Themida), RWX sections, overlay data (bytes appended past the last section), suspicious API imports (process injection, anti-debugging, credential access, network/exfiltration — and combinations like network + injection APIs together, a common backdoor pattern)
+- **Mach-O heuristics** — a from-scratch macOS Mach-O header parser (thin and fat/universal binaries) scoring the same structural traits where they have a macOS equivalent: RWX segments, high-entropy segments, missing code signature, and dylibs linked from unusual locations (`/tmp`, `Downloads`, path traversal) rather than the standard system/bundle-relative paths
 - **Authenticode validation** — not just "is it signed", but whether the signature actually chains to a trusted root certificate; a self-signed or tampered signature is scored differently than a properly CA-signed one
-- **Archive scanning** — `.zip` and `.7z` files are opened and every entry inside is scanned with the same pipeline, including password-protected archives (tried against a configurable list of conventional passwords in `signatures/archive_passwords.txt` — malware sample collections are routinely shared encrypted, to stop AV engines auto-deleting them and prevent accidental double-click execution), with zip-bomb guards (per-entry and total decompressed size caps, entry count cap)
+- **Archive scanning** — `.zip` and `.7z` files are opened and every entry inside is scanned with the same pipeline, including password-protected archives (tried against a configurable list of conventional passwords in `signatures/archive_passwords.txt` — malware sample collections are routinely shared encrypted, to stop AV engines auto-deleting them and prevent accidental double-click execution) and archives nested inside archives (up to 5 levels deep — a zip inside a zip is common when a collection repackages a third-party installer), with zip-bomb guards (per-entry and total decompressed size caps, entry count cap, recursion depth cap)
 
-No external antivirus/YARA native dependencies — everything is self-contained managed code.
+No external antivirus/YARA native dependencies — everything is self-contained managed code. Directory scans run across all CPU cores in parallel while still streaming results back live as each file finishes.
 
 Beyond detection, it also has:
 
@@ -64,7 +66,7 @@ Or grab the prebuilt `.exe` from the [Releases](../../releases) page — self-co
 
 ## Extending detection
 
-Drop more SHA-256 hashes into `signatures/hashes.txt`, or more `.yar` rule files into `rules/` — both load at runtime, no rebuild needed. Add a file's hash to `signatures/allowlist.txt` to stop it being flagged. Add more conventional archive passwords to `signatures/archive_passwords.txt` if you work with a sample source that uses one not already listed.
+Drop more SHA-256 hashes into `signatures/hashes.txt`, more CTPH fuzzy hashes into `signatures/fuzzy_hashes.txt` (one `blocksize:hash1:hash2  label` per line, same format as the exact-hash list — compute one from a file with `OpenSecurity.Core.Hashing.FuzzyHash.Compute`), or more `.yar` rule files into `rules/` — all load at runtime, no rebuild needed. Add a file's hash to `signatures/allowlist.txt` to stop it being flagged. Add more conventional archive passwords to `signatures/archive_passwords.txt` if you work with a sample source that uses one not already listed.
 
 To pull in more signatures from a feed:
 
@@ -79,6 +81,8 @@ OpenSecurity.Cli.exe update-signatures https://bazaar.abuse.ch/export/txt/sha256
 - [Endermanch/MalwareDatabase](https://github.com/Endermanch/MalwareDatabase) (2,741 hashes — mostly rogue/PUP, joke, trojan, and ransomware samples)
 - [Pyran1/MalwareDatabase](https://github.com/Pyran1/MalwareDatabase) (1,637 hashes — 200+ categories spanning Windows, Linux, Android, and cross-platform malware)
 - A macOS-specific malware collection (1,870 hashes — Mach-O binaries, .app bundles, .dmg/.pkg installers)
+
+`signatures/fuzzy_hashes.txt` includes 3,276 CTPH fuzzy hashes computed from a representative sample (~300 archives) drawn from all three collections above, proportional to their size. Validated end-to-end against a real sample: a modified copy of a real ZeuS variant from the Pyran1 collection (25% of its bytes changed, producing a completely different SHA-256 that the exact-hash list doesn't contain) still scored an 86% fuzzy match and was correctly flagged Suspicious.
 
 Getting these archives open at all is what proved out the password-protected-archive support (all three collections are shared encrypted, each with its own conventional password) and, in this release, surfaced a real gap: some curated archives repackage third-party installers that keep their own original password instead of the collection's convention, so a single zip can mix passwords per entry. The scanner now retries an individual entry against every configured password before giving up on it, instead of assuming one password unlocks the whole archive.
 

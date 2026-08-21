@@ -155,7 +155,9 @@
                     <Run Text="{Binding AllowlistCount, Mode=OneWay}" FontWeight="SemiBold" />
                     <Run Text="allowlisted  ·" />
                     <Run Text="{Binding ArchivePasswordCount, Mode=OneWay}" FontWeight="SemiBold" />
-                    <Run Text="archive passwords" />
+                    <Run Text="archive passwords  ·" />
+                    <Run Text="{Binding FuzzySignatureCount, Mode=OneWay}" FontWeight="SemiBold" />
+                    <Run Text="fuzzy signatures" />
                 </TextBlock>
 
                 <TextBox Grid.Column="1" Margin="14,0" VerticalContentAlignment="Center"
