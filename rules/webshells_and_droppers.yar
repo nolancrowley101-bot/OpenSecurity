@@ -18,12 +18,16 @@ rule Suspicious_PHP_Webshell_Eval : Suspicious
 
 rule Suspicious_Script_Downloader : Suspicious
 {
+    // "Net.WebClient" alone is too broad - it's a substring of a real .NET namespace/type
+    // name that can appear in a compiled assembly's metadata even when WebClient itself
+    // isn't used or invoked as a downloader. The invocation-syntax patterns below (an actual
+    // method call, not just a namespace fragment) already cover the same real-world one-liner
+    // without that false-positive surface.
     strings:
         $a = "DownloadString(" ascii nocase
         $b = "DownloadFile(" ascii nocase
         $c = "IEX (New-Object" ascii nocase
         $d = "Invoke-Expression" ascii nocase
-        $e = "Net.WebClient" ascii nocase
 
     condition:
         any of them

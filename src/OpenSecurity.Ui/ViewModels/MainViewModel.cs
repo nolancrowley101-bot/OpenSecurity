@@ -67,6 +67,10 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public ObservableCollection<ScanRowViewModel> Results { get; } = new();
 
+    // Mirrors every scanned row regardless of verdict, so exports/CanExport still reflect the
+    // whole scan even though the visible Results list only shows what needs attention.
+    private readonly List<ScanRowViewModel> _allResults = new();
+
     public string TargetPath
     {
         get => _targetPath;
@@ -98,7 +102,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public bool CanScan => !IsScanning && (File.Exists(TargetPath) || Directory.Exists(TargetPath));
-    public bool CanExport => !IsScanning && Results.Count > 0;
+    public bool CanExport => !IsScanning && _allResults.Count > 0;
 
     public string StatusText
     {
@@ -152,6 +156,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         Results.Clear();
+        _allResults.Clear();
         CleanCount = 0;
         SuspiciousCount = 0;
         MaliciousCount = 0;
@@ -166,6 +171,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
         var path = TargetPath;
         var recursive = IsRecursive;
         var scannedResults = new List<ScanResult>();
+        Exception? scanException = null;
 
         try
         {
@@ -183,6 +189,14 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
             });
         }
+        catch (Exception ex)
+        {
+            // Nothing in the scan pipeline (a parser bug on a malformed file, a heuristic edge
+            // case) should be able to crash the app mid-scan - surface it and keep whatever
+            // results were already gathered instead of losing the whole run to an async void
+            // event handler with no catch above it.
+            scanException = ex;
+        }
         finally
         {
             _stopwatch.Stop();
@@ -190,7 +204,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
             ElapsedLabel = $"{_stopwatch.Elapsed.TotalSeconds:F1}s";
             IsScanning = false;
             OnPropertyChanged(nameof(CanExport));
-            StatusText = $"Scanned {Results.Count} file(s) in {_stopwatch.Elapsed.TotalSeconds:F1}s.";
+            StatusText = scanException is null
+                ? $"Scanned {scannedResults.Count} file(s) in {_stopwatch.Elapsed.TotalSeconds:F1}s."
+                : $"Scan stopped after an unexpected error ({scanException.Message}) - {scannedResults.Count} file(s) scanned before it happened.";
 
             _historyStore.Append(ScanHistoryEntry.FromResults(path, scannedResults, _stopwatch.Elapsed.TotalSeconds));
             RefreshHistory();
@@ -199,7 +215,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void ExportReport(string path)
     {
-        ReportExporter.Export(Results.Select(r => r.Result).ToList(), path);
+        ReportExporter.Export(_allResults.Select(r => r.Result).ToList(), path);
         StatusText = $"Report exported to {path}.";
     }
 
@@ -254,7 +270,13 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void AddResult(ScanRowViewModel row)
     {
-        Results.Add(row);
+        // The visible list only surfaces what needs attention - clean files still count toward
+        // the summary totals and still land in _allResults for export, they just don't clutter
+        // the list itself.
+        _allResults.Add(row);
+        if (row.Verdict != Verdict.Clean)
+            Results.Add(row);
+
         switch (row.Verdict)
         {
             case Verdict.Clean: CleanCount++; break;

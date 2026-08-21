@@ -13,8 +13,13 @@ rule Suspicious_PowerShell_EncodedCommand : Suspicious
 
 rule Suspicious_Amsi_Bypass_Reference : Suspicious
 {
+    // The bare native API name "AmsiScanBuffer" is too broad on its own - any AMSI-aware
+    // software (including the .NET runtime's own built-in AMSI integration, bundled into
+    // every self-contained .NET app) legitimately references it. PowerShell's internal
+    // AmsiUtils type name is specific to the well-known reflection-based bypass technique
+    // and isn't something legitimate AMSI-integrated code would contain.
     strings:
-        $amsi = "AmsiScanBuffer" ascii
+        $amsiUtils = "System.Management.Automation.AmsiUtils" ascii nocase
         $amsiCtx = "amsiInitFailed" ascii
 
     condition:

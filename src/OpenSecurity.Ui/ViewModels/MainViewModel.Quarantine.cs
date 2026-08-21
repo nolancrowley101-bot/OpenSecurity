@@ -13,9 +13,22 @@ public sealed partial class MainViewModel
 
     public void QuarantineResult(ScanRowViewModel row)
     {
-        var reason = string.Join("; ", row.Findings.Select(f => f.Name));
-        _quarantineManager.Quarantine(row.FilePath, row.Sha256, reason);
+        try
+        {
+            var reason = string.Join("; ", row.Findings.Select(f => f.Name));
+            _quarantineManager.Quarantine(row.FilePath, row.Sha256, reason);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The file can legitimately be gone or locked (moved/deleted since the scan ran,
+            // still open in another program) - report it instead of crashing on a plain
+            // synchronous WPF event handler, which has nothing above it to catch this either.
+            StatusText = $"Could not quarantine {Path.GetFileName(row.FilePath)}: {ex.Message}";
+            return;
+        }
+
         Results.Remove(row);
+        _allResults.Remove(row);
         DecrementCount(row.Verdict);
         OnPropertyChanged(nameof(CanExport));
         RefreshQuarantineEntries();
@@ -26,6 +39,7 @@ public sealed partial class MainViewModel
     {
         HashSignatureDatabase.AppendNewEntries(_allowlistPath, new[] { (row.Sha256, "user-allowlisted") });
         Results.Remove(row);
+        _allResults.Remove(row);
         DecrementCount(row.Verdict);
         OnPropertyChanged(nameof(CanExport));
         ReloadEngine();
@@ -34,14 +48,32 @@ public sealed partial class MainViewModel
 
     public void RestoreQuarantineEntry(QuarantineRowViewModel entry)
     {
-        _quarantineManager.Restore(entry.Id);
+        try
+        {
+            _quarantineManager.Restore(entry.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText = $"Could not restore {Path.GetFileName(entry.OriginalPath)}: {ex.Message}";
+            return;
+        }
+
         RefreshQuarantineEntries();
         StatusText = $"Restored {Path.GetFileName(entry.OriginalPath)}.";
     }
 
     public void DeleteQuarantineEntry(QuarantineRowViewModel entry)
     {
-        _quarantineManager.Delete(entry.Id);
+        try
+        {
+            _quarantineManager.Delete(entry.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText = $"Could not delete {Path.GetFileName(entry.OriginalPath)}: {ex.Message}";
+            return;
+        }
+
         RefreshQuarantineEntries();
         StatusText = $"Permanently deleted quarantined file (was {Path.GetFileName(entry.OriginalPath)}).";
     }

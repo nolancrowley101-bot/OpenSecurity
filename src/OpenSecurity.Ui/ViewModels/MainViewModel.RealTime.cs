@@ -118,10 +118,22 @@ public sealed partial class MainViewModel
         // threshold on multiple combined signals) can be moved out of reach before the user
         // gets a chance to double-click it. Quarantine is reversible via the Quarantine tab,
         // so this errs toward acting rather than just logging a detection nobody may notice.
+        string? quarantineFailure = null;
         if (_settings.AutoQuarantineOnDetect && result.OverallVerdict == Verdict.Malicious)
         {
-            var reason = string.Join("; ", result.Findings.Select(f => f.Name));
-            _quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
+            try
+            {
+                var reason = string.Join("; ", result.Findings.Select(f => f.Name));
+                _quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // The file can legitimately be gone or locked by the time this runs (another
+                // process still writing it, a build tool rebuilding it, the user having already
+                // deleted it) - this runs on a background thread with nothing above it to catch
+                // an unhandled exception, so a real I/O failure here must not go unhandled.
+                quarantineFailure = ex.Message;
+            }
         }
 
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
@@ -129,6 +141,9 @@ public sealed partial class MainViewModel
             RealTimeDetections.Insert(0, new ScanRowViewModel(result));
             while (RealTimeDetections.Count > MaxRealTimeDetections)
                 RealTimeDetections.RemoveAt(RealTimeDetections.Count - 1);
+
+            if (quarantineFailure is not null)
+                RealTimeQuarantineFailed?.Invoke(result.FilePath, quarantineFailure);
 
             RealTimeThreatDetected?.Invoke(result);
         });
@@ -142,4 +157,9 @@ public sealed partial class MainViewModel
 
     /// <summary>Lets the UI pop a tray balloon/notification without the view model knowing about WinForms.</summary>
     public event Action<ScanResult>? RealTimeThreatDetected;
+
+    /// <summary>Fired when auto-quarantining a real-time detection fails (file locked/already
+    /// gone) - the detection itself is still reported via <see cref="RealTimeThreatDetected"/>,
+    /// this just surfaces that the follow-up quarantine action specifically didn't succeed.</summary>
+    public event Action<string, string>? RealTimeQuarantineFailed;
 }

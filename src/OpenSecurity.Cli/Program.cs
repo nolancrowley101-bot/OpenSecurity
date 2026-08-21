@@ -44,7 +44,7 @@ public static class Program
         }
 
         var appDir = AppContext.BaseDirectory;
-        var hashDbPath = options.HashDbPath ?? DefaultPaths.FindUp(appDir, Path.Combine("signatures", "hashes.txt"));
+        var hashDbPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "hashes.txt"));
         var rulesDir = options.RulesDir ?? DefaultPaths.FindUp(appDir, "rules");
         var allowlistPath = options.AllowlistPath ?? DefaultPaths.FindUp(appDir, Path.Combine("signatures", "allowlist.txt"));
         var archivePasswordsPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "archive_passwords.txt"));
@@ -99,9 +99,16 @@ public static class Program
                     PrintFindings(result, "MALICIOUS");
                     if (options.Quarantine)
                     {
-                        var reason = string.Join("; ", result.Findings.Select(f => f.Name));
-                        var entry = quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
-                        Console.WriteLine($"    -> quarantined (id: {entry.Id})");
+                        try
+                        {
+                            var reason = string.Join("; ", result.Findings.Select(f => f.Name));
+                            var entry = quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
+                            Console.WriteLine($"    -> quarantined (id: {entry.Id})");
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            Console.WriteLine($"    -> could not quarantine: {ex.Message}");
+                        }
                     }
                     break;
                 case Verdict.Error:
@@ -131,20 +138,13 @@ public static class Program
         if (args.Length == 0)
         {
             Console.Error.WriteLine($"error: missing feed URL");
-            Console.Error.WriteLine($"usage: OpenSecurity.Cli update-signatures <url> [--hashdb <file>]");
+            Console.Error.WriteLine($"usage: OpenSecurity.Cli update-signatures <url>");
             Console.Error.WriteLine($"  suggested feed: {SignatureUpdater.SuggestedFeedUrl}");
             return 2;
         }
 
         var url = args[0];
-        string? hashDbPath = null;
-        for (var i = 1; i < args.Length; i++)
-        {
-            if (args[i] == "--hashdb" && ++i < args.Length)
-                hashDbPath = args[i];
-        }
-
-        hashDbPath ??= DefaultPaths.FindUp(AppContext.BaseDirectory, Path.Combine("signatures", "hashes.txt"))
+        var hashDbPath = DefaultPaths.FindUp(AppContext.BaseDirectory, Path.Combine("signatures", "hashes.txt"))
             ?? Path.Combine(AppContext.BaseDirectory, "signatures", "hashes.txt");
 
         Console.WriteLine($"Fetching signature feed from {url} ...");
@@ -338,9 +338,19 @@ public static class Program
 
             if (quarantine && result.OverallVerdict == Verdict.Malicious)
             {
-                var reason = string.Join("; ", result.Findings.Select(f => f.Name));
-                var entry = quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
-                Console.WriteLine($"    -> quarantined (id: {entry.Id})");
+                try
+                {
+                    var reason = string.Join("; ", result.Findings.Select(f => f.Name));
+                    var entry = quarantineManager.Quarantine(result.FilePath, result.Sha256, reason);
+                    Console.WriteLine($"    -> quarantined (id: {entry.Id})");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // This fires from RealTimeProtectionService's background scan loop - an
+                    // unhandled exception here would otherwise be an unobserved task exception
+                    // with nothing above it to catch a file that's since been moved or locked.
+                    Console.WriteLine($"    -> could not quarantine: {ex.Message}");
+                }
             }
         };
 
@@ -374,8 +384,8 @@ public static class Program
             OpenSecurity - on-demand malware scanner
 
             Usage:
-              OpenSecurity.Cli <path> [--recursive] [--verbose] [--hashdb <file>] [--rules <dir>] [--allowlist <file>] [--quarantine] [--export <file>]
-              OpenSecurity.Cli update-signatures <url> [--hashdb <file>]
+              OpenSecurity.Cli <path> [--recursive] [--verbose] [--rules <dir>] [--allowlist <file>] [--quarantine] [--export <file>]
+              OpenSecurity.Cli update-signatures <url>
               OpenSecurity.Cli list-quarantine
               OpenSecurity.Cli restore-quarantine <id>
               OpenSecurity.Cli list-history
@@ -388,7 +398,6 @@ public static class Program
               --recursive, -r      Scan directories recursively (default: on for directories)
               --no-recursive       Disable recursive directory scan
               --verbose, -v        Print clean files too, not just detections
-              --hashdb <file>      Path to hash signature database (default: signatures/hashes.txt)
               --rules <dir>        Path to pattern rules directory (default: rules/)
               --allowlist <file>   Path to allowlist database (default: signatures/allowlist.txt)
               --quarantine         Move malicious files to quarantine instead of just reporting them

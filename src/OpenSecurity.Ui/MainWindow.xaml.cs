@@ -31,6 +31,8 @@ public partial class MainWindow : Window
 
         _viewModel.RealTimeThreatDetected += result =>
             _trayIcon.ShowBalloon("OpenSecurity - threat detected", $"{result.OverallVerdict}: {Path.GetFileName(result.FilePath)}");
+        _viewModel.RealTimeQuarantineFailed += (filePath, reason) =>
+            _trayIcon.ShowBalloon("OpenSecurity - quarantine failed", $"{Path.GetFileName(filePath)}: {reason}");
 
         if (startMinimized)
         {
