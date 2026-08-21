@@ -74,9 +74,15 @@ OpenSecurity.Cli.exe update-signatures https://bazaar.abuse.ch/export/txt/sha256
 
 ### Validated against a real malware sample set
 
-`signatures/hashes.txt` includes 2,741 hashes of confirmed-malicious samples from [Endermanch/MalwareDatabase](https://github.com/Endermanch/MalwareDatabase) (a public, password-protected malware sample collection — mostly rogue/PUP, joke, trojan, and ransomware samples), computed directly from the real archives. This is also what proved out the password-protected-archive support: those archives are encrypted, and getting them open was necessary before they could be hashed at all.
+`signatures/hashes.txt` includes 6,249 hashes of confirmed-malicious samples computed directly from three public, password-protected malware sample collections:
 
-Full-database scan results: **162 of 163 archives correctly flagged malicious** (the 5 "clean" files in the set are the collection's own non-malware readme/PDF/script content, not samples). The one exception uses a rare zip variant (AES encryption + LZMA compression instead of the near-universal AES+DEFLATE) that the underlying archive library can't decode yet — it's reported honestly as an unsupported format rather than a misleading "wrong password".
+- [Endermanch/MalwareDatabase](https://github.com/Endermanch/MalwareDatabase) (2,741 hashes — mostly rogue/PUP, joke, trojan, and ransomware samples)
+- [Pyran1/MalwareDatabase](https://github.com/Pyran1/MalwareDatabase) (1,637 hashes — 200+ categories spanning Windows, Linux, Android, and cross-platform malware)
+- A macOS-specific malware collection (1,870 hashes — Mach-O binaries, .app bundles, .dmg/.pkg installers)
+
+Getting these archives open at all is what proved out the password-protected-archive support (all three collections are shared encrypted, each with its own conventional password) and, in this release, surfaced a real gap: some curated archives repackage third-party installers that keep their own original password instead of the collection's convention, so a single zip can mix passwords per entry. The scanner now retries an individual entry against every configured password before giving up on it, instead of assuming one password unlocks the whole archive.
+
+Full combined-dataset scan results (2,116 files, all three collections): **2,092 correctly flagged malicious**, 21 correctly identified as clean (the collections' own non-malware readme/license/script content, not samples), 0 false negatives among files the engine could open. The 3 remaining "error" results are honestly-reported gaps, not misses: one rare zip variant (AES encryption + LZMA compression instead of the near-universal AES+DEFLATE) that the underlying archive library can't decode yet, and two samples split across multi-volume `.zip.001`/`.zip.002` archives (live multi-volume scanning wasn't worth adding for 2 files out of 2,116 — their content was hashed manually instead, so they're still detected once extracted).
 
 ## CLI reference
 

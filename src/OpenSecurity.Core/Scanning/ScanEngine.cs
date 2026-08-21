@@ -222,8 +222,18 @@ public sealed class ScanEngine
                     }
                     catch (Exception ex)
                     {
-                        result.Findings.Add(new ScanFinding("archive", Verdict.Error, "entry-read-error", $"[{entry.Key}] {ex.Message}", 0));
-                        continue;
+                        // Some curated malware collections repackage third-party installers inside
+                        // the archive, each keeping its own original password instead of the
+                        // collection's own convention - a single zip can genuinely mix passwords
+                        // per entry. Before giving up on this entry, retry it against every other
+                        // configured password (a fresh archive open each time, since a failed
+                        // decrypt/decompress can't be resumed mid-entry on the same stream).
+                        entryBytes = TryReadEntryWithOtherPasswords(archiveBytes, entry.Key, password, candidatePasswords);
+                        if (entryBytes is null)
+                        {
+                            result.Findings.Add(new ScanFinding("archive", Verdict.Error, "entry-read-error", $"[{entry.Key}] {ex.Message}", 0));
+                            continue;
+                        }
                     }
 
                     if (entryBytes is null)
@@ -257,6 +267,42 @@ public sealed class ScanEngine
         var (_, entryFindings) = ScanContent(entryBytes, null);
         foreach (var finding in entryFindings)
             result.Findings.Add(new ScanFinding("archive", finding.Verdict, finding.Name, $"[{entryName}] {finding.Detail}", finding.Score));
+    }
+
+    /// <summary>Retries a single archive entry (matched by key) against every password other than
+    /// the one already locked in for the rest of the archive, re-opening a fresh archive/stream
+    /// per attempt. Returns null if none of them can decrypt/decompress it.</summary>
+    private static byte[]? TryReadEntryWithOtherPasswords(byte[] archiveBytes, string? entryKey, string? alreadyTried, List<string?> candidatePasswords)
+    {
+        if (entryKey is null)
+            return null;
+
+        foreach (var password in candidatePasswords)
+        {
+            if (password == alreadyTried)
+                continue;
+
+            try
+            {
+                var stream = new MemoryStream(archiveBytes);
+                var options = password is null ? new ReaderOptions() : new ReaderOptions { Password = password };
+                using var archive = ArchiveFactory.OpenArchive(stream, options);
+                var entry = archive.Entries.FirstOrDefault(e => !e.IsDirectory && e.Key == entryKey);
+                if (entry is null)
+                    continue;
+
+                using var entryStream = entry.OpenEntryStream();
+                var bytes = ReadBounded(entryStream, MaxArchiveEntryBytes);
+                if (bytes is not null)
+                    return bytes;
+            }
+            catch
+            {
+                // Wrong password for this entry too - try the next candidate.
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Reads a stream into a byte array, returning null instead of exceeding <paramref name="maxBytes"/>

@@ -160,4 +160,21 @@ public class ScanEngineZipTests : IDisposable
 
         Assert.Contains(result.Findings, f => f.Source == "archive" && f.Name == "password-protected");
     }
+
+    [Fact]
+    public void ScanFile_ZipWithDifferentPasswordsPerEntry_ScansEveryEntry()
+    {
+        // Real-world malware collections repackage third-party installers inside a curated
+        // archive, and each nested file can keep its own original password instead of the
+        // collection's convention - fixture built with 7-Zip via two separate "7z a -p<pw>"
+        // invocations against the same zip, so payload_a.txt (containing TESTMARKER) is
+        // encrypted with "passwordA" and payload_b.txt with "passwordB". The archive-level
+        // password lock-in (based on the first entry) must not cause later entries encrypted
+        // with a different password to be silently skipped.
+        var result = MakeEngineWithPasswords("passwordA", "passwordB").ScanFile(FixturePath("mixedpw_sample.zip"));
+
+        Assert.Equal(Verdict.Malicious, result.OverallVerdict);
+        Assert.Contains(result.Findings, f => f.Source == "archive" && f.Detail.Contains("payload_a.txt"));
+        Assert.DoesNotContain(result.Findings, f => f.Source == "archive" && f.Name == "entry-read-error");
+    }
 }
