@@ -47,19 +47,22 @@ public static class Program
         var hashDbPath = options.HashDbPath ?? DefaultPaths.FindUp(appDir, Path.Combine("signatures", "hashes.txt"));
         var rulesDir = options.RulesDir ?? DefaultPaths.FindUp(appDir, "rules");
         var allowlistPath = options.AllowlistPath ?? DefaultPaths.FindUp(appDir, Path.Combine("signatures", "allowlist.txt"));
+        var archivePasswordsPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "archive_passwords.txt"));
 
         var hashDb = hashDbPath is not null ? HashSignatureDatabase.Load(hashDbPath) : HashSignatureDatabase.Empty();
         var rules = rulesDir is not null ? PatternRuleParser.ParseDirectory(rulesDir) : new List<PatternRule>();
         var allowlist = allowlistPath is not null ? HashSignatureDatabase.Load(allowlistPath) : HashSignatureDatabase.Empty();
+        var archivePasswords = archivePasswordsPath is not null ? ArchivePasswordList.Load(archivePasswordsPath) : new List<string>();
 
         Console.WriteLine($"OpenSecurity core scan engine");
         Console.WriteLine($"  by Nolan Crowley - Open Source (MIT License)");
         Console.WriteLine($"  hash signatures loaded : {hashDb.Count} (from {hashDbPath ?? "none found"})");
         Console.WriteLine($"  pattern rules loaded    : {rules.Count} (from {rulesDir ?? "none found"})");
         Console.WriteLine($"  allowlist entries       : {allowlist.Count} (from {allowlistPath ?? "none found"})");
+        Console.WriteLine($"  archive passwords       : {archivePasswords.Count} (from {archivePasswordsPath ?? "none found"})");
         Console.WriteLine();
 
-        var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist);
+        var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist, archivePasswords);
         var quarantineManager = new QuarantineManager(DefaultPaths.DefaultQuarantineDirectory());
 
         var stopwatch = Stopwatch.StartNew();
@@ -307,11 +310,13 @@ public static class Program
         var hashDbPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "hashes.txt"));
         var rulesDir = DefaultPaths.FindUp(appDir, "rules");
         var allowlistPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "allowlist.txt"));
+        var archivePasswordsPath = DefaultPaths.FindUp(appDir, Path.Combine("signatures", "archive_passwords.txt"));
 
         var hashDb = hashDbPath is not null ? HashSignatureDatabase.Load(hashDbPath) : HashSignatureDatabase.Empty();
         var rules = rulesDir is not null ? PatternRuleParser.ParseDirectory(rulesDir) : new List<PatternRule>();
         var allowlist = allowlistPath is not null ? HashSignatureDatabase.Load(allowlistPath) : HashSignatureDatabase.Empty();
-        var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist);
+        var archivePasswords = archivePasswordsPath is not null ? ArchivePasswordList.Load(archivePasswordsPath) : new List<string>();
+        var engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist, archivePasswords);
 
         using var service = new RealTimeProtectionService(engine);
         service.FileScanned += result => Console.WriteLine($"[scanned]    {result.FilePath} -> {result.OverallVerdict}");

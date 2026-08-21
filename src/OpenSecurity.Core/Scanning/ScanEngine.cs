@@ -1,29 +1,33 @@
-using System.IO.Compression;
 using OpenSecurity.Core.Hashing;
 using OpenSecurity.Core.Heuristics;
 using OpenSecurity.Core.Pe;
 using OpenSecurity.Core.Rules;
+using SharpCompress.Archives;
+using SharpCompress.Readers;
 
 namespace OpenSecurity.Core.Scanning;
 
 public sealed class ScanEngine
 {
     private const long MaxFileSizeBytes = 200L * 1024 * 1024; // 200 MB safety cap
-    private const int MaxZipEntries = 2000;
-    private const long MaxZipEntryBytes = 50L * 1024 * 1024; // per-entry cap, smaller than the top-level cap since archives are more zip-bomb-prone
-    private const long MaxZipTotalBytes = 500L * 1024 * 1024; // total decompressed budget across the whole archive
+    private const int MaxArchiveEntries = 2000;
+    private const long MaxArchiveEntryBytes = 50L * 1024 * 1024; // per-entry cap, smaller than the top-level cap since archives are more zip-bomb-prone
+    private const long MaxArchiveTotalBytes = 500L * 1024 * 1024; // total decompressed budget across the whole archive
 
     private readonly HashScanner _hashScanner;
     private readonly PatternRuleEngine _ruleEngine;
     private readonly HeuristicAnalyzer _heuristicAnalyzer;
     private readonly HashSignatureDatabase _allowlist;
+    private readonly IReadOnlyList<string> _archivePasswords;
 
-    public ScanEngine(HashScanner hashScanner, PatternRuleEngine ruleEngine, HeuristicAnalyzer heuristicAnalyzer, HashSignatureDatabase? allowlist = null)
+    public ScanEngine(HashScanner hashScanner, PatternRuleEngine ruleEngine, HeuristicAnalyzer heuristicAnalyzer,
+        HashSignatureDatabase? allowlist = null, IReadOnlyList<string>? archivePasswords = null)
     {
         _hashScanner = hashScanner;
         _ruleEngine = ruleEngine;
         _heuristicAnalyzer = heuristicAnalyzer;
         _allowlist = allowlist ?? HashSignatureDatabase.Empty();
+        _archivePasswords = archivePasswords ?? Array.Empty<string>();
     }
 
     public ScanResult ScanFile(string path)
@@ -60,8 +64,8 @@ public sealed class ScanEngine
         var result = new ScanResult { FilePath = path, FileSizeBytes = fileBytes.LongLength, Sha256 = sha256 };
         result.Findings.AddRange(findings);
 
-        if (IsZipMagic(fileBytes))
-            ScanZipEntries(fileBytes, result);
+        if (IsSupportedArchiveMagic(fileBytes))
+            ScanArchiveEntries(fileBytes, result);
 
         return result;
     }
@@ -115,70 +119,144 @@ public sealed class ScanEngine
         return (sha256, findings);
     }
 
-    private static bool IsZipMagic(byte[] bytes) =>
-        bytes.Length >= 4 && bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] is 0x03 or 0x05 or 0x07 && bytes[3] is 0x04 or 0x06 or 0x08;
-
-    private void ScanZipEntries(byte[] zipBytes, ScanResult result)
+    private static bool IsSupportedArchiveMagic(byte[] bytes)
     {
-        using var stream = new MemoryStream(zipBytes);
-        ZipArchive archive;
-        try
-        {
-            archive = new ZipArchive(stream, ZipArchiveMode.Read);
-        }
-        catch (InvalidDataException)
-        {
-            result.Findings.Add(new ScanFinding("archive", Verdict.Error, "corrupt-archive", "could not be opened as a valid zip", 0));
-            return;
-        }
+        if (bytes.Length >= 4 && bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] is 0x03 or 0x05 or 0x07 && bytes[3] is 0x04 or 0x06 or 0x08)
+            return true; // zip
 
-        using (archive)
-        {
-            var entryCount = 0;
-            long totalBytesRead = 0;
+        if (bytes.Length >= 6 && bytes[0] == 0x37 && bytes[1] == 0x7A && bytes[2] == 0xBC && bytes[3] == 0xAF && bytes[4] == 0x27 && bytes[5] == 0x1C)
+            return true; // 7z
 
-            foreach (var entry in archive.Entries)
+        return false;
+    }
+
+    /// <summary>
+    /// Opens zip/7z archives - including password-protected ones, common for malware sample
+    /// collections shared this way to prevent AV auto-deletion/accidental execution - and scans
+    /// every entry with the same pipeline as a real file. Tries no password first, then each
+    /// entry in the configured password list, so it also handles unencrypted archives cheaply.
+    /// </summary>
+    private void ScanArchiveEntries(byte[] archiveBytes, ScanResult result)
+    {
+        var candidatePasswords = new List<string?> { null };
+        candidatePasswords.AddRange(_archivePasswords);
+        Exception? lastFailure = null;
+
+        foreach (var password in candidatePasswords)
+        {
+            IArchive archive;
+            try
             {
-                if (string.IsNullOrEmpty(entry.Name))
-                    continue; // directory entry
+                var stream = new MemoryStream(archiveBytes);
+                var options = password is null ? new ReaderOptions() : new ReaderOptions { Password = password };
+                archive = ArchiveFactory.OpenArchive(stream, options);
+            }
+            catch (Exception ex)
+            {
+                // Not this format, or this password attempt failed outright - try the next candidate.
+                if (lastFailure is not NotSupportedException)
+                    lastFailure = ex;
+                continue;
+            }
 
-                if (++entryCount > MaxZipEntries)
-                {
-                    result.Findings.Add(new ScanFinding("archive", Verdict.Error, "too-many-entries", $"stopped after {MaxZipEntries} entries", 0));
-                    break;
-                }
-
-                if (totalBytesRead >= MaxZipTotalBytes)
-                {
-                    result.Findings.Add(new ScanFinding("archive", Verdict.Error, "archive-too-large", $"stopped after {MaxZipTotalBytes / 1024 / 1024} MB of decompressed content", 0));
-                    break;
-                }
-
-                byte[]? entryBytes;
+            using (archive)
+            {
+                // For 7z, decryption happens at the folder/header level, so a wrong password can
+                // throw as soon as entries are enumerated - not just when reading an entry's stream
+                // (unlike zip, where each entry is independently encrypted). Validate both steps
+                // under the same catch so either format's failure mode moves on to the next password.
+                List<IArchiveEntry> entries;
+                byte[]? firstEntryBytes;
                 try
                 {
-                    using var entryStream = entry.Open();
-                    entryBytes = ReadBounded(entryStream, MaxZipEntryBytes);
+                    entries = archive.Entries.Where(e => !e.IsDirectory).ToList();
+                    if (entries.Count == 0)
+                        return; // nothing to scan, whether or not the archive is encrypted
+
+                    using var firstStream = entries[0].OpenEntryStream();
+                    firstEntryBytes = ReadBounded(firstStream, MaxArchiveEntryBytes);
                 }
-                catch (Exception ex) when (ex is InvalidDataException or IOException)
+                catch (Exception ex)
                 {
-                    result.Findings.Add(new ScanFinding("archive", Verdict.Error, "entry-read-error", $"[{entry.FullName}] {ex.Message}", 0));
+                    // Wrong password (or a corrupt/unsupported entry) - try the next candidate password.
+                    // NotSupportedException means the password actually got past decryption into a
+                    // codec we can't decode (e.g. LZMA+AES zip, an uncommon variant) - more informative
+                    // than a generic wrong-password failure, so it takes priority when reported below.
+                    if (lastFailure is not NotSupportedException)
+                        lastFailure = ex;
                     continue;
                 }
 
-                if (entryBytes is null)
+                long totalBytesRead = 0;
+                if (firstEntryBytes is not null)
                 {
-                    result.Findings.Add(new ScanFinding("archive", Verdict.Error, "entry-too-large", $"[{entry.FullName}] exceeds {MaxZipEntryBytes / 1024 / 1024} MB, skipped", 0));
-                    continue;
+                    totalBytesRead += firstEntryBytes.LongLength;
+                    ScoreArchiveEntry(entries[0].Key ?? "?", firstEntryBytes, result);
+                }
+                else
+                {
+                    result.Findings.Add(new ScanFinding("archive", Verdict.Error, "entry-too-large",
+                        $"[{entries[0].Key}] exceeds {MaxArchiveEntryBytes / 1024 / 1024} MB, skipped", 0));
                 }
 
-                totalBytesRead += entryBytes.LongLength;
+                for (var i = 1; i < entries.Count; i++)
+                {
+                    if (i >= MaxArchiveEntries)
+                    {
+                        result.Findings.Add(new ScanFinding("archive", Verdict.Error, "too-many-entries", $"stopped after {MaxArchiveEntries} entries", 0));
+                        break;
+                    }
 
-                var (_, entryFindings) = ScanContent(entryBytes, null);
-                foreach (var finding in entryFindings)
-                    result.Findings.Add(new ScanFinding("archive", finding.Verdict, finding.Name, $"[{entry.FullName}] {finding.Detail}", finding.Score));
+                    if (totalBytesRead >= MaxArchiveTotalBytes)
+                    {
+                        result.Findings.Add(new ScanFinding("archive", Verdict.Error, "archive-too-large", $"stopped after {MaxArchiveTotalBytes / 1024 / 1024} MB of decompressed content", 0));
+                        break;
+                    }
+
+                    var entry = entries[i];
+                    byte[]? entryBytes;
+                    try
+                    {
+                        using var entryStream = entry.OpenEntryStream();
+                        entryBytes = ReadBounded(entryStream, MaxArchiveEntryBytes);
+                    }
+                    catch (Exception ex)
+                    {
+                        result.Findings.Add(new ScanFinding("archive", Verdict.Error, "entry-read-error", $"[{entry.Key}] {ex.Message}", 0));
+                        continue;
+                    }
+
+                    if (entryBytes is null)
+                    {
+                        result.Findings.Add(new ScanFinding("archive", Verdict.Error, "entry-too-large", $"[{entry.Key}] exceeds {MaxArchiveEntryBytes / 1024 / 1024} MB, skipped", 0));
+                        continue;
+                    }
+
+                    totalBytesRead += entryBytes.LongLength;
+                    ScoreArchiveEntry(entry.Key ?? "?", entryBytes, result);
+                }
+
+                return; // found a working password (or the archive wasn't encrypted) - done
             }
         }
+
+        if (lastFailure is NotSupportedException)
+        {
+            result.Findings.Add(new ScanFinding("archive", Verdict.Error, "unsupported-archive",
+                $"could not open - uses a compression/encryption combination this version doesn't support ({lastFailure.Message})", 0));
+        }
+        else
+        {
+            result.Findings.Add(new ScanFinding("archive", Verdict.Error, "password-protected",
+                "could not open - password-protected with an unknown password, or corrupt. Add the password to signatures/archive_passwords.txt to scan it.", 0));
+        }
+    }
+
+    private void ScoreArchiveEntry(string entryName, byte[] entryBytes, ScanResult result)
+    {
+        var (_, entryFindings) = ScanContent(entryBytes, null);
+        foreach (var finding in entryFindings)
+            result.Findings.Add(new ScanFinding("archive", finding.Verdict, finding.Name, $"[{entryName}] {finding.Detail}", finding.Score));
     }
 
     /// <summary>Reads a stream into a byte array, returning null instead of exceeding <paramref name="maxBytes"/>

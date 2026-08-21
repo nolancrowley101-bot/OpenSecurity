@@ -22,4 +22,8 @@
     <ProjectReference Include="..\..\src\OpenSecurity.Core\OpenSecurity.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="TestFixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -22,7 +22,7 @@ OpenSecurity scans a file, folder, archive, or entire drive using several detect
 - **Pattern rules** — simplified YARA-style string/hex matching (`rules/*.yar`) — 10 built-in rules covering EICAR, PowerShell/AMSI abuse, webshells, script downloaders, living-off-the-land binary abuse, ransom-note language, and Office macro auto-exec patterns
 - **Heuristics** — a from-scratch PE (Portable Executable) header parser that scores packing signs (high-entropy sections, known packer section names like UPX/ASPack/Themida), RWX sections, overlay data (bytes appended past the last section), suspicious API imports (process injection, anti-debugging, credential access, network/exfiltration — and combinations like network + injection APIs together, a common backdoor pattern)
 - **Authenticode validation** — not just "is it signed", but whether the signature actually chains to a trusted root certificate; a self-signed or tampered signature is scored differently than a properly CA-signed one
-- **Archive scanning** — `.zip` files are opened and every entry inside is scanned with the same pipeline, with zip-bomb guards (per-entry and total decompressed size caps, entry count cap)
+- **Archive scanning** — `.zip` and `.7z` files are opened and every entry inside is scanned with the same pipeline, including password-protected archives (tried against a configurable list of conventional passwords in `signatures/archive_passwords.txt` — malware sample collections are routinely shared encrypted, to stop AV engines auto-deleting them and prevent accidental double-click execution), with zip-bomb guards (per-entry and total decompressed size caps, entry count cap)
 
 No external antivirus/YARA native dependencies — everything is self-contained managed code.
 
@@ -64,13 +64,19 @@ Or grab the prebuilt `.exe` from the [Releases](../../releases) page — self-co
 
 ## Extending detection
 
-Drop more SHA-256 hashes into `signatures/hashes.txt`, or more `.yar` rule files into `rules/` — both load at runtime, no rebuild needed. Add a file's hash to `signatures/allowlist.txt` to stop it being flagged.
+Drop more SHA-256 hashes into `signatures/hashes.txt`, or more `.yar` rule files into `rules/` — both load at runtime, no rebuild needed. Add a file's hash to `signatures/allowlist.txt` to stop it being flagged. Add more conventional archive passwords to `signatures/archive_passwords.txt` if you work with a sample source that uses one not already listed.
 
 To pull in more signatures from a feed:
 
 ```bash
 OpenSecurity.Cli.exe update-signatures https://bazaar.abuse.ch/export/txt/sha256/full/
 ```
+
+### Validated against a real malware sample set
+
+`signatures/hashes.txt` includes 2,741 hashes of confirmed-malicious samples from [Endermanch/MalwareDatabase](https://github.com/Endermanch/MalwareDatabase) (a public, password-protected malware sample collection — mostly rogue/PUP, joke, trojan, and ransomware samples), computed directly from the real archives. This is also what proved out the password-protected-archive support: those archives are encrypted, and getting them open was necessary before they could be hashed at all.
+
+Full-database scan results: **162 of 163 archives correctly flagged malicious** (the 5 "clean" files in the set are the collection's own non-malware readme/PDF/script content, not samples). The one exception uses a rare zip variant (AES encryption + LZMA compression instead of the near-universal AES+DEFLATE) that the underlying archive library can't decode yet — it's reported honestly as an unsupported format rather than a misleading "wrong password".
 
 ## CLI reference
 

@@ -23,6 +23,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly string _hashDbPath;
     private readonly string _rulesDir;
     private readonly string _allowlistPath;
+    private readonly string _archivePasswordsPath;
     private readonly SignatureUpdater _signatureUpdater = new();
     private readonly DispatcherTimer _elapsedTimer;
     private Stopwatch? _stopwatch;
@@ -37,12 +38,13 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _updateFeedUrl = SignatureUpdater.SuggestedFeedUrl;
 
     public MainViewModel(
-        string hashDbPath, string rulesDir, string allowlistPath, string quarantineDirectory,
+        string hashDbPath, string rulesDir, string allowlistPath, string archivePasswordsPath, string quarantineDirectory,
         string historyFilePath, string settingsFilePath, Action<bool>? applyAutoStart = null)
     {
         _hashDbPath = hashDbPath;
         _rulesDir = rulesDir;
         _allowlistPath = allowlistPath;
+        _archivePasswordsPath = archivePasswordsPath;
         _quarantineManager = new QuarantineManager(quarantineDirectory);
         _historyStore = new ScanHistoryStore(historyFilePath);
         _scheduledScanManager = new ScheduledScanManager();
@@ -120,6 +122,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     private int _hashSignatureCount;
     private int _ruleCount;
     private int _allowlistCount;
+    private int _archivePasswordCount;
 
     public int CleanCount { get => _cleanCount; private set { _cleanCount = value; OnPropertyChanged(); } }
     public int SuspiciousCount { get => _suspiciousCount; private set { _suspiciousCount = value; OnPropertyChanged(); } }
@@ -128,6 +131,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     public int HashSignatureCount { get => _hashSignatureCount; private set { _hashSignatureCount = value; OnPropertyChanged(); } }
     public int RuleCount { get => _ruleCount; private set { _ruleCount = value; OnPropertyChanged(); } }
     public int AllowlistCount { get => _allowlistCount; private set { _allowlistCount = value; OnPropertyChanged(); } }
+    public int ArchivePasswordCount { get => _archivePasswordCount; private set { _archivePasswordCount = value; OnPropertyChanged(); } }
 
     public void ScanFullDrive(string driveRoot)
     {
@@ -220,11 +224,13 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
         var hashDb = File.Exists(_hashDbPath) ? HashSignatureDatabase.Load(_hashDbPath) : HashSignatureDatabase.Empty();
         var rules = Directory.Exists(_rulesDir) ? PatternRuleParser.ParseDirectory(_rulesDir) : new List<PatternRule>();
         var allowlist = File.Exists(_allowlistPath) ? HashSignatureDatabase.Load(_allowlistPath) : HashSignatureDatabase.Empty();
+        var archivePasswords = File.Exists(_archivePasswordsPath) ? ArchivePasswordList.Load(_archivePasswordsPath) : new List<string>();
 
-        _engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist);
+        _engine = new ScanEngine(new HashScanner(hashDb), new PatternRuleEngine(rules), new HeuristicAnalyzer(), allowlist, archivePasswords);
         HashSignatureCount = hashDb.Count;
         RuleCount = rules.Count;
         AllowlistCount = allowlist.Count;
+        ArchivePasswordCount = archivePasswords.Count;
 
         RestartRealTimeProtectionIfRunning();
     }

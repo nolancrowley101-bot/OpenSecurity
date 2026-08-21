@@ -30,6 +30,13 @@ public class ScanEngineZipTests : IDisposable
     private static ScanEngine MakeEngine() =>
         new(new HashScanner(HashSignatureDatabase.Empty()), new PatternRuleEngine(TestRules), new HeuristicAnalyzer());
 
+    private static ScanEngine MakeEngineWithPasswords(params string[] passwords) =>
+        new(new HashScanner(HashSignatureDatabase.Empty()), new PatternRuleEngine(TestRules), new HeuristicAnalyzer(),
+            allowlist: null, archivePasswords: passwords);
+
+    private static string FixturePath(string name) =>
+        Path.Combine(AppContext.BaseDirectory, "TestFixtures", name);
+
     [Fact]
     public void ScanFile_ZipContainingMatch_FlagsArchiveFindingWithEntryName()
     {
@@ -98,5 +105,59 @@ public class ScanEngineZipTests : IDisposable
 
         Assert.DoesNotContain(result.Findings, f => f.Source == "archive");
         Assert.Equal(Verdict.Malicious, result.OverallVerdict); // still caught by the top-level rule scan
+    }
+
+    // The fixtures below are real AES-encrypted zip/7z archives created with 7-Zip, mirroring how
+    // real malware sample collections are commonly shared (encrypted so AV engines and accidental
+    // double-clicks can't touch the payload). "mysubsarethebest" is the actual password convention
+    // used by a well-known public malware sample repository.
+
+    [Fact]
+    public void ScanFile_PasswordProtectedZip_OpensWithConfiguredPassword_AndFlagsContent()
+    {
+        var result = MakeEngineWithPasswords("wrongfirst", "mysubsarethebest").ScanFile(FixturePath("encrypted_sample.zip"));
+
+        Assert.Equal(Verdict.Malicious, result.OverallVerdict);
+        Assert.Contains(result.Findings, f => f.Source == "archive" && f.Detail.Contains("payload.txt"));
+    }
+
+    [Fact]
+    public void ScanFile_ZipUsingLzmaPlusAesEncryption_ReportsUnsupportedCodec_NotMisleadingWrongPassword()
+    {
+        // A real sample from a public malware database used this exact combination (AES-256 +
+        // LZMA in a zip, rather than the far more common AES+DEFLATE) - SharpCompress 0.50.4
+        // can't decode it even with the correct password. The important thing is the error
+        // message says so accurately, rather than implying the password itself was wrong.
+        var result = MakeEngineWithPasswords("wrongfirst", "mysubsarethebest").ScanFile(FixturePath("encrypted_lzma_sample.zip"));
+
+        var archiveError = result.Findings.SingleOrDefault(f => f.Source == "archive");
+        Assert.NotNull(archiveError);
+        Assert.Equal("unsupported-archive", archiveError!.Name);
+        Assert.DoesNotContain("unknown password", archiveError.Detail);
+    }
+
+    [Fact]
+    public void ScanFile_PasswordProtectedSevenZip_OpensWithConfiguredPassword_AndFlagsContent()
+    {
+        var result = MakeEngineWithPasswords("mysubsarethebest").ScanFile(FixturePath("encrypted_sample.7z"));
+
+        Assert.Equal(Verdict.Malicious, result.OverallVerdict);
+        Assert.Contains(result.Findings, f => f.Source == "archive" && f.Detail.Contains("payload7z"));
+    }
+
+    [Fact]
+    public void ScanFile_PasswordProtectedZip_WithoutMatchingPassword_ReportsErrorWithoutCrashing()
+    {
+        var result = MakeEngine().ScanFile(FixturePath("encrypted_sample.zip")); // no passwords configured at all
+
+        Assert.Contains(result.Findings, f => f.Source == "archive" && f.Name == "password-protected");
+    }
+
+    [Fact]
+    public void ScanFile_ZipEncryptedWithUnlistedPassword_ReportsErrorWithoutCrashing()
+    {
+        var result = MakeEngineWithPasswords("mysubsarethebest", "infected").ScanFile(FixturePath("wrongpw_sample.zip"));
+
+        Assert.Contains(result.Findings, f => f.Source == "archive" && f.Name == "password-protected");
     }
 }
