@@ -43,8 +43,20 @@ Then sign a build with:
 
 ## Upgrading to a real (CA-issued) certificate
 
-1. Buy a code-signing certificate from a CA (DigiCert, Sectigo, SSL.com, etc.) - requires identity/business verification.
-2. Export it as a `.pfx` with a password.
-3. Replace `signing/OpenSecurity-SelfSigned.pfx` and `signing/cert-password.txt` with the new files (same filenames, or pass `-PfxPath`/`-PfxPasswordFile` to the script).
+**EV (Extended Validation)** clears SmartScreen almost immediately (no reputation-building
+period) because issuance requires stronger identity verification. The trade-off: Microsoft's
+CA/Browser Forum baseline requirements mandate the private key live on a hardware token (a
+USB dongle shipped by the CA) or a cloud HSM - it can't be exported as a portable `.pfx`.
+Typical cost is roughly $300-600/year from a CA like DigiCert, Sectigo, or SSL.com; expect
+the identity/business verification step to take anywhere from a day to a couple of weeks.
 
-No code changes needed - `scripts/sign-release.ps1` works the same either way.
+**OV (Organization Validation)** is cheaper (roughly $70-300/year) and can usually be
+exported as a `.pfx`, but SmartScreen still warns initially - it clears over time as
+download/run reputation builds, with no fixed timeline.
+
+Once you have a certificate:
+
+- **.pfx-based (OV, or EV via a cloud HSM that exposes one)**: replace `signing/OpenSecurity-SelfSigned.pfx` and `signing/cert-password.txt` with the new files (same filenames, or pass `-PfxPath`/`-PfxPasswordFile` to the script).
+- **Hardware-token EV**: install the token's driver/software from the CA, plug in the dongle, then find the certificate's thumbprint with `Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert` (or `Cert:\LocalMachine\My`) and pass it as `-CertThumbprint` to `scripts/sign-release.ps1` - the token handles the private key, signtool never touches a password file. The token typically needs to be plugged into whatever machine actually runs the signing step.
+
+No other code changes needed either way - `scripts/sign-release.ps1` already supports both modes.
