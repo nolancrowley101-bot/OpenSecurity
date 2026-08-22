@@ -105,6 +105,8 @@ To scan an entire drive, just point it at the root: `OpenSecurity.Cli.exe C:\ --
 
 Release exes are signed with a self-signed certificate — see [`signing/README.md`](signing/README.md) for how to regenerate it or swap in a CA-issued certificate. A self-signed certificate proves the signature pipeline works and makes the exe tamper-evident, but it does **not** stop Windows SmartScreen warnings for anyone downloading the exe — only a certificate from a trusted CA does that, and those cost money and require identity verification.
 
+Seeing "the publisher could not be verified" when you run a downloaded release exe? If you trust the source (e.g. these releases), run `scripts/trust-cert.ps1` first — it imports the public certificate into your own Windows account so it shows the real publisher instead of "Unknown Publisher." Free, but manual and per-person; see [`signing/README.md`](signing/README.md#letting-people-trust-the-self-signed-certificate-free-but-manual) for details.
+
 ## Status
 
 This is a personal/educational project, not a replacement for a commercial antivirus. Real-time protection is a user-mode folder watcher, not a kernel-mode filter driver — it can't intercept execution the way a real AV's minifilter does, but it does catch files as they land in watched folders.

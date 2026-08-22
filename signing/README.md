@@ -41,6 +41,28 @@ Then sign a build with:
 ./scripts/sign-release.ps1 -Files "publish\ui\OpenSecurity.Ui.exe","publish\cli\OpenSecurity.Cli.exe"
 ```
 
+## Letting people trust the self-signed certificate (free, but manual)
+
+The self-signed certificate can't be trusted automatically for anyone but the machine
+that created it - that's what a CA-issued certificate is for. As a free, manual
+alternative for people who already trust the source they're getting OpenSecurity from
+(e.g. its own GitHub releases), `scripts/trust-cert.ps1` imports the public certificate
+(`OpenSecurity-SelfSigned.cer` - no private key, safe to run from anyone) into their
+Windows account's Trusted Root and Trusted Publisher stores:
+
+```powershell
+./scripts/trust-cert.ps1
+# or, to also remove the "Open File" prompt from specific downloaded exes:
+./scripts/trust-cert.ps1 -UnblockFiles "OpenSecurity.Ui.exe","OpenSecurity.Cli.exe"
+```
+
+Windows will show its own native confirmation dialog before adding a root certificate -
+that's an OS security gate, not something this script can or should skip. This fixes the
+"Unknown Publisher" / "Open File - Security Warning" prompt; it does **not** touch
+SmartScreen's separate, reputation-based blue "Windows protected your PC" screen, which
+only a CA-issued certificate resolves. It's a per-person, opt-in step, not something that
+helps anonymous downloaders who never run it.
+
 ## Upgrading to a real (CA-issued) certificate
 
 **EV (Extended Validation)** clears SmartScreen almost immediately (no reputation-building
